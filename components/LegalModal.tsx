@@ -40,15 +40,13 @@ const DOCS: Record<LegalDoc, { title: string; body: string[] }> = {
     ],
   },
   hillcover: {
-    title: 'HillCover Protection Guarantee',
+    title: '24-Hour Payout Escrow Hold',
     body: [
-      'Every booking on Hilt includes HillCover guarantee at no additional cost:',
-      '• Escrow protection — your funds are held in secure escrow and disbursed to the host only 24 hours after check-in.',
-      '• Weather & road closure cover — 100% refund if landslides, heavy snowfall, or official police/NHAI/BRO road closures physically block access to your destination within 48 hours of check-in.',
-      '• Stay accuracy guarantee — materially inaccurate listings or host cancellation qualifies for 100% refund plus up to ₹5,000 relocation credit.',
-      '• Host structural & amenity cover — verified accidental damage caused during a stay is eligible for reimbursement up to ₹50,000 from the Hilt reserve pool.',
-      '• Claims process: Submit via Trips → HillCover within 48 hours of check-in or incident with photographic/documentary proof. 24-hour review SLA.',
-      '• Emergency Ops: claims@hilt.travel | 24/7 Helpline: +91 1800-4458-2273 (1800-HILT-CARE).',
+      'Every booking on Hilt is secured by an automated 24-hour payment escrow hold:',
+      '• Escrow protection — your funds are held in secure escrow and disbursed to the host only 24 hours after successful check-in.',
+      '• Guest protection — allows travelers to arrive and verify that the stay exists and matches the listing before host payout is released.',
+      '• Host protection — hosts are guaranteed that the guest has paid in full before arrival, eliminating cash disputes or unpaid stays.',
+      '• Direct resolution — any disputes regarding stay rules or property damage are resolved directly between host and guest. Hilt acts solely as a payment facilitator and does not underwrite third-party insurance or damage guarantees.',
     ],
   },
   privacy: {

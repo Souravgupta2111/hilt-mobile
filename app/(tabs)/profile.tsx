@@ -526,7 +526,7 @@ export default function ProfileScreen() {
             activeOpacity={0.7}
           >
             <Umbrella size={18} color={Colors.textPrimary} />
-            <Text style={styles.menuRowText}>HillCover ₹50,000 Guarantee</Text>
+            <Text style={styles.menuRowText}>24-Hour Escrow Protection</Text>
           </TouchableOpacity>
 
           <TouchableOpacity

@@ -18,7 +18,7 @@ import { MapPin, Calendar, MessageCircle, Minus, Plus } from 'lucide-react-nativ
 import { Colors } from '../../constants/theme';
 import { EmptyState } from '../../components/EmptyState';
 import { ReceiptModal } from '../../components/ReceiptModal';
-import { HillCoverClaimModal } from '../../components/HillCoverClaimModal';
+import { HillCoverModal } from '../../components/HillCoverModal';
 import { CalendarRangePicker } from '../../components/CalendarRangePicker';
 import { getOrCreateConversation } from '../../lib/chat';
 import {
@@ -37,7 +37,7 @@ export default function TripsScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [modifyTarget, setModifyTarget] = useState<Booking | null>(null);
   const [receiptTarget, setReceiptTarget] = useState<Booking | null>(null);
-  const [claimTarget, setClaimTarget] = useState<Booking | null>(null);
+  const [isEscrowModalOpen, setIsEscrowModalOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const loadBookings = useCallback(async () => {
@@ -105,9 +105,9 @@ export default function TripsScreen() {
   };
 
   const handleHelp = (b: Booking) => {
-    Alert.alert('Trip Help & HillCover', 'What do you need assistance with?', [
+    Alert.alert('Trip Help', 'What do you need assistance with?', [
       { text: 'Chat with host', onPress: () => openChat(b) },
-      { text: 'File HillCover claim', onPress: () => setClaimTarget(b) },
+      { text: '24-Hour Escrow Protection', onPress: () => setIsEscrowModalOpen(true) },
       {
         text: 'Cancellation policy',
         onPress: () => Alert.alert('Policy', quoteCancellation(b).policy),
@@ -178,9 +178,6 @@ export default function TripsScreen() {
               <TouchableOpacity style={styles.ghostBtn} onPress={() => setReceiptTarget(b)}>
                 <Text style={styles.ghostText}>Receipt</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.ghostBtn} onPress={() => setClaimTarget(b)}>
-                <Text style={[styles.ghostText, { color: '#059669', fontWeight: '700' }]}>HillCover</Text>
-              </TouchableOpacity>
               <TouchableOpacity style={styles.ghostBtn} onPress={() => handleHelp(b)}>
                 <Text style={styles.ghostText}>Help</Text>
               </TouchableOpacity>
@@ -232,11 +229,9 @@ export default function TripsScreen() {
         onClose={() => setReceiptTarget(null)}
       />
 
-      <HillCoverClaimModal
-        visible={!!claimTarget}
-        booking={claimTarget}
-        onClose={() => setClaimTarget(null)}
-        onSubmitted={loadBookings}
+      <HillCoverModal
+        visible={isEscrowModalOpen}
+        onClose={() => setIsEscrowModalOpen(false)}
       />
 
       {modifyTarget && (
