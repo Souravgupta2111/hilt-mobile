@@ -1,5 +1,6 @@
 // Supabase Edge Function: razorpay-create-order
-// Handles creation of Razorpay order with automated 2% Hilt fee split and 98% Escrow hold.
+// Creates a Razorpay order carrying the full booking intent in notes so the
+// signature-verified webhook can confirm the exact booking (no guessing).
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
@@ -18,19 +19,37 @@ serve(async (req) => {
   }
 
   try {
-    const { amount, currency = "INR", property_id, guest_id, nights } = await req.json();
+    const body = await req.json();
+    const {
+      amount,
+      currency = "INR",
+      property_id,
+      traveler_id,
+      room_id,
+      booking_type = "entire_villa",
+      check_in,
+      check_out,
+      guests_count = 2,
+      total_nights = 1,
+      nightly_rate,
+      subtotal,
+      cleaning_fee = 0,
+      platform_fee,
+      gst_amount = 0,
+      initial_status = 'confirmed',
+      guest_email,
+    } = body;
 
-    if (!amount || !property_id) {
+    if (!amount || !property_id || !traveler_id || !check_in || !check_out) {
       return new Response(JSON.stringify({ error: "Missing required booking fields" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    const platformFee = Math.round(amount * 0.02); // 2% Hilt Commission
-    const hostEscrowAmount = amount - platformFee; // 98% Held for host
+    const fee = platform_fee ?? Math.round((subtotal ?? amount) * 0.02);
+    const sub = subtotal ?? amount - fee;
 
-    // Call Razorpay Orders API
     const authHeader = `Basic ${btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`)}`;
     const razorpayResponse = await fetch("https://api.razorpay.com/v1/orders", {
       method: "POST",
@@ -39,21 +58,38 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        amount: Math.round(amount * 100), // in paise
+        amount: Math.round(amount * 100), // paise
         currency,
         receipt: `rcpt_${property_id.substring(0, 8)}_${Date.now()}`,
         notes: {
           property_id,
-          guest_id: guest_id || "guest_direct",
-          platform_fee_inr: platformFee.toString(),
-          host_escrow_inr: hostEscrowAmount.toString(),
-          nights: nights.toString(),
+          traveler_id,
+          room_id: room_id || "",
+          booking_type,
+          check_in,
+          check_out,
+          guests_count: String(guests_count),
+          total_nights: String(total_nights),
+          nightly_rate: String(nightly_rate ?? 0),
+          subtotal: String(sub),
+          cleaning_fee: String(cleaning_fee),
+          platform_fee: String(fee),
+          gst_amount: String(gst_amount),
+          total_amount: String(amount),
+          initial_status: initial_status === "pending" ? "pending" : "confirmed",
+          guest_email: guest_email || "",
           hillcover_protected: "true",
         },
       }),
     });
 
     const orderData = await razorpayResponse.json();
+    if (!razorpayResponse.ok) {
+      return new Response(
+        JSON.stringify({ error: orderData?.error?.description || "Razorpay order failed" }),
+        { status: 502, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     return new Response(
       JSON.stringify({
@@ -61,8 +97,8 @@ serve(async (req) => {
         order: orderData,
         escrow_summary: {
           total_inr: amount,
-          host_payout_inr: hostEscrowAmount,
-          hilt_fair_fee_inr: platformFee,
+          host_payout_inr: sub - fee,
+          hilt_fair_fee_inr: fee,
           escrow_hold_hours: 24,
         },
       }),

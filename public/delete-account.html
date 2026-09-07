@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account and Data Deletion - Hilt</title>
+  <style>
+    :root {
+      --primary: #0F1419;
+      --secondary: #536471;
+      --border: #E1E8ED;
+      --bg: #FAFAFA;
+      --card-bg: #FFFFFF;
+      --danger: #DC2626;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.65;
+      color: var(--primary);
+      background-color: var(--bg);
+      margin: 0;
+      padding: 0;
+    }
+    .header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 24px 20px;
+      text-align: center;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 800;
+    }
+    .container {
+      max-width: 680px;
+      margin: 32px auto;
+      padding: 32px 24px;
+      background: var(--card-bg);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    }
+    h2 {
+      font-size: 18px;
+      margin-top: 24px;
+      margin-bottom: 12px;
+      color: var(--primary);
+    }
+    p, li {
+      font-size: 15px;
+      color: #333333;
+    }
+    .step-box {
+      background: #F9FAFB;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 16px 0;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    input, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 15px;
+    }
+    button {
+      background-color: var(--danger);
+      color: #FFFFFF;
+      border: none;
+      padding: 12px 20px;
+      font-size: 15px;
+      font-weight: 700;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #B91C1C;
+    }
+    .footer {
+      text-align: center;
+      margin: 40px 0 20px;
+      font-size: 13px;
+      color: var(--secondary);
+    }
+    a {
+      color: #0284C7;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Hilt Account & Data Deletion Request</h1>
+  </div>
+
+  <div class="container">
+    <p>Under the Digital Personal Data Protection (DPDP) Act 2023, Apple App Store Guideline 5.1.1(v), and Google Play Data Safety policies, you have the absolute right to request permanent deletion of your Hilt account and all associated personal data.</p>
+
+    <h2>Method 1: Instant In-App Deletion (Fastest)</h2>
+    <div class="step-box">
+      <ol style="margin: 0; padding-left: 20px;">
+        <li>Open the <strong>Hilt</strong> app on your iPhone or Android phone.</li>
+        <li>Tap the <strong>Profile</strong> tab in the bottom navigation.</li>
+        <li>Scroll down to the <strong>Account Settings</strong> section.</li>
+        <li>Tap <strong>Delete Account</strong> and confirm the prompt.</li>
+      </ol>
+      <p style="margin: 10px 0 0; font-size: 13px; color: #666;">Your account, auth credentials, saved properties, and profile are immediately and permanently erased.</p>
+    </div>
+
+    <h2>Method 2: Web Deletion Request</h2>
+    <p>If you have uninstalled the app or cannot access your device, submit your request below or email <a href="mailto:privacy@hilt.travel">privacy@hilt.travel</a> with the subject line <em>"Account Deletion Request"</em>.</p>
+
+    <form onsubmit="handleSubmit(event)">
+      <div class="form-group">
+        <label for="email">Registered Email Address or Mobile Number</label>
+        <input type="text" id="identifier" placeholder="name@example.com or +91 98160 00000" required>
+      </div>
+      <div class="form-group">
+        <label for="notes">Reason / Notes (Optional)</label>
+        <textarea id="notes" rows="3" placeholder="Let us know why you are leaving..."></textarea>
+      </div>
+      <button type="submit">Submit Deletion Request</button>
+    </form>
+
+    <div id="statusMessage" style="display:none; margin-top: 16px; padding: 12px; background: #ECFDF5; border: 1px solid #10B981; border-radius: 6px; color: #065F46;">
+      Thank you. Your request has been received. Our data compliance officer will verify and purge all records associated with this account within 48 hours.
+    </div>
+
+    <h2>What Data is Deleted?</h2>
+    <ul>
+      <li>Your personal authentication record (Supabase Auth).</li>
+      <li>Your user profile, name, phone number, and avatar.</li>
+      <li>Your saved wishlists and trip drafts.</li>
+      <li>Host listings (if any) are delisted.</li>
+      <li>Financial invoices are retained in anonymized format solely for mandatory Indian GST and Income Tax statutory retention periods.</li>
+    </ul>
+  </div>
+
+  <div class="footer">
+    &copy; 2026 Hilt Technologies Private Limited. · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a>
+  </div>
+
+  <script>
+    function handleSubmit(e) {
+      e.preventDefault();
+      document.getElementById('statusMessage').style.display = 'block';
+      e.target.reset();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["TEAMID.com.hilt.travel"],
+        "components": [
+          {
+            "#": "no_universal_links",
+            "exclude": true,
+            "comment": "Exclude links with no_universal_links"
+          },
+          {
+            "/": "/stay/*",
+            "comment": "Property pages"
+          },
+          {
+            "/": "/trip/*",
+            "comment": "Trip / booking pages"
+          },
+          {
+            "/": "/plan/*",
+            "comment": "Itineraries"
+          }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["TEAMID.com.hilt.travel"]
+  }
+}

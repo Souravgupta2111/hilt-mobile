@@ -1,12 +1,12 @@
 // Supabase Edge Function: ical-sync
-// Fetches external .ics calendar feeds from Airbnb/MakeMyTrip, parses VEVENT blocks,
-// and blocks corresponding dates in Hilt's availability calendar.
+// Fetches an external .ics feed (Airbnb/MMT), parses VEVENT blocks and stores
+// them as availability blocks — never as fake bookings.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://eccqfucljzppqomaiwgp.supabase.co";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -26,47 +26,40 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Missing property_id or ical_url" }), { status: 400 });
     }
 
-    // 1. Fetch remote .ics file
     const icsRes = await fetch(ical_url);
+    if (!icsRes.ok) throw new Error(`Feed fetch failed (${icsRes.status})`);
     const icsText = await icsRes.text();
 
-    // 2. Parse VEVENT blocks
-    const events: Array<{ start: string; end: string; summary: string }> = [];
+    // Collect every blocked calendar date in the feed.
+    const blocked = new Set<string>();
     const eventBlocks = icsText.split("BEGIN:VEVENT");
-
     for (let i = 1; i < eventBlocks.length; i++) {
       const block = eventBlocks[i];
       const startMatch = block.match(/DTSTART(?:;VALUE=DATE)?:(\d{8})/);
       const endMatch = block.match(/DTEND(?:;VALUE=DATE)?:(\d{8})/);
-      const summaryMatch = block.match(/SUMMARY:(.*)/);
-
-      if (startMatch && endMatch) {
-        events.push({
-          start: `${startMatch[1].slice(0, 4)}-${startMatch[1].slice(4, 6)}-${startMatch[1].slice(6, 8)}`,
-          end: `${endMatch[1].slice(0, 4)}-${endMatch[1].slice(4, 6)}-${endMatch[1].slice(6, 8)}`,
-          summary: summaryMatch ? summaryMatch[1].trim() : `Blocked on ${source}`,
-        });
+      if (!startMatch || !endMatch) continue;
+      const fmt = (s: string) => `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+      let cur = new Date(fmt(startMatch[1]));
+      const end = new Date(fmt(endMatch[1]));
+      while (cur < end) {
+        blocked.add(cur.toISOString().split("T")[0]);
+        cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
       }
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-    // 3. Save blocked dates
-    for (const evt of events) {
-      await supabase.from("bookings").upsert({
-        property_id,
-        check_in: evt.start,
-        check_out: evt.end,
-        status: "external_blocked",
-        notes: `Imported from ${source} calendar sync`,
-      }, { onConflict: "property_id,check_in" });
+    for (const date of blocked) {
+      await supabase.from("property_blocks").upsert(
+        { property_id, blocked_date: date, source },
+        { onConflict: "property_id,blocked_date" }
+      );
     }
 
     return new Response(
       JSON.stringify({
         success: true,
         source,
-        events_synced: events.length,
+        events_synced: blocked.size,
         synced_at: new Date().toISOString(),
       }),
       {

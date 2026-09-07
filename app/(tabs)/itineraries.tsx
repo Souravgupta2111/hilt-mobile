@@ -1,435 +1,356 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  Image,
+  TextInput,
   TouchableOpacity,
-  Share,
   Platform,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { Sparkles, Minus, Plus, ChevronRight } from 'lucide-react-native';
+import { generateMountainItinerary, type GeneratedItinerary } from '../../lib/ai-concierge';
 import {
-  Compass,
-  MapPin,
-  Clock,
-  Sparkles,
-  Share2,
-  Utensils,
-  Footprints,
-  Eye,
-  Heart,
-  Calendar,
-} from 'lucide-react-native';
-import { getItineraries } from '../../lib/supabase';
-import { Itinerary } from '../../types/database';
+  getMyItineraries,
+  saveGeneratedItinerary,
+  itineraryToGenerated,
+} from '../../lib/supabase';
+import type { Itinerary } from '../../types/database';
+import { ItineraryResultView } from '../../components/ItineraryResultView';
+import { EmptyState } from '../../components/EmptyState';
 import { Colors } from '../../constants/theme';
-import { AiConciergeModal } from '../../components/AiConciergeModal';
+
+const SUGGESTIONS = ['Jibhi & Tirthan', 'Old Manali', 'Mukteshwar', 'Kasol'];
+
+const VIBES = [
+  { id: 'slow_living', label: 'Slow living' },
+  { id: 'trekking_adventure', label: 'Treks' },
+  { id: 'food_culture', label: 'Food' },
+  { id: 'quiet_workation', label: 'Workation' },
+] as const;
 
 export default function ItinerariesScreen() {
-  const [itineraries, setItineraries] = useState<Itinerary[]>([]);
-  const [activeDay, setActiveDay] = useState<number>(1);
-  const [isAiOpen, setIsAiOpen] = useState(false);
+  const [valley, setValley] = useState('');
+  const [days, setDays] = useState(3);
+  const [travelers, setTravelers] = useState(2);
+  const [vibe, setVibe] = useState<(typeof VIBES)[number]['id']>('slow_living');
+  const [plan, setPlan] = useState<GeneratedItinerary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<Itinerary[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [savedFlag, setSavedFlag] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    getItineraries().then((data) => setItineraries(data));
+  const loadSaved = useCallback(async () => {
+    setSaved(await getMyItineraries());
   }, []);
 
-  const currentItinerary = itineraries[0];
+  useFocusEffect(
+    useCallback(() => {
+      loadSaved();
+    }, [loadSaved])
+  );
 
-  const handleShare = async () => {
-    if (currentItinerary) {
-      await Share.share({
-        message: `Explore "${currentItinerary.title}" on Hilt - Slow Himalayan Living & Local Curations: https://hilt.travel/itinerary/${currentItinerary.id}`,
+  const handleGenerate = async () => {
+    const destination = valley.trim();
+    if (!destination) {
+      setError('Tell Gemini where you want to go.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await generateMountainItinerary({
+        valley: destination,
+        durationDays: days,
+        travelersCount: travelers,
+        travelStyle: vibe,
+        amenitiesNeeded: ['fiber_wifi'],
       });
+      setPlan(data);
+      setSavedFlag(false);
+    } catch (e: any) {
+      setError(e.message || 'Could not plan this trip. Try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const getCategoryIcon = (cat: string) => {
-    switch (cat) {
-      case 'food':
-        return <Utensils size={14} color="#EA580C" />;
-      case 'trek':
-        return <Footprints size={14} color="#16A34A" />;
-      case 'viewpoint':
-      default:
-        return <Eye size={14} color="#2563EB" />;
+  const handleSave = async () => {
+    if (!plan || saving) return;
+    setSaving(true);
+    try {
+      await saveGeneratedItinerary(plan);
+      setSavedFlag(true);
+      await loadSaved();
+    } catch (e: any) {
+      setError(e.message || 'Could not save trip.');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const openSaved = (item: Itinerary) => {
+    setPlan(itineraryToGenerated(item));
+    setSavedFlag(true);
+    setError(null);
+  };
+
+  const reset = () => {
+    setPlan(null);
+    setSavedFlag(false);
+    setError(null);
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* Top Header */}
       <View style={styles.header}>
-        <View>
-          <View style={styles.badgeRow}>
-            <Sparkles size={13} color={Colors.primaryBlack} />
-            <Text style={styles.badgeText}>GHUMNA PHIRNA</Text>
-          </View>
-          <Text style={styles.headerTitle}>Mountain Itineraries</Text>
-        </View>
-
-        <View style={styles.headerRightRow}>
-          <TouchableOpacity
-            style={styles.aiPlanButton}
-            onPress={() => setIsAiOpen(true)}
-            activeOpacity={0.85}
-          >
-            <Sparkles size={14} color={Colors.textWhite} />
-            <Text style={styles.aiPlanButtonText}>AI Plan</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.shareButton} onPress={handleShare} activeOpacity={0.8}>
-            <Share2 size={18} color={Colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.headerTitle}>Ghumna Phirna</Text>
+        <Text style={styles.headerSub}>AI trip planner for the hills</Text>
       </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              await loadSaved();
+              setRefreshing(false);
+            }}
+          />
+        }
       >
-        {currentItinerary && (
-          <View>
-            {/* Featured Itinerary Hero Card */}
-            <View style={styles.heroCard}>
-              <Image
-                source={{
-                  uri:
-                    currentItinerary.hero_image ||
-                    'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1200&auto=format&fit=crop&q=80',
-                }}
-                style={styles.heroImage}
-                resizeMode="cover"
-              />
-              <View style={styles.heroOverlay}>
-                <View style={styles.regionTag}>
-                  <MapPin size={12} color={Colors.textWhite} />
-                  <Text style={styles.regionText}>{currentItinerary.region}</Text>
-                </View>
+        {!plan ? (
+          <View style={styles.plannerCard}>
+            <View style={styles.aiRow}>
+              <Sparkles size={14} color={Colors.textPrimary} />
+              <Text style={styles.aiLabel}>Planned by Gemini</Text>
+            </View>
 
-                <Text style={styles.heroTitle}>{currentItinerary.title}</Text>
-                <Text style={styles.heroSummary}>{currentItinerary.summary}</Text>
+            <Text style={styles.fieldLabel}>Where to?</Text>
+            <TextInput
+              style={styles.input}
+              value={valley}
+              onChangeText={(t) => {
+                setValley(t);
+                if (error) setError(null);
+              }}
+              placeholder="Jibhi, Manali, Mukteshwar…"
+              placeholderTextColor={Colors.textMuted}
+            />
+            <View style={styles.suggestionRow}>
+              {SUGGESTIONS.map((s) => (
+                <TouchableOpacity key={s} style={styles.suggestion} onPress={() => setValley(s)}>
+                  <Text style={styles.suggestionText}>{s}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-                <View style={styles.heroFooter}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Clock size={14} color={Colors.textWhite} />
-                    <Text style={styles.heroMeta}>{currentItinerary.duration_days} Days Pace</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Heart size={14} color={Colors.heartRed} fill={Colors.heartRed} />
-                    <Text style={styles.heroMeta}>{currentItinerary.likes_count} Curators</Text>
-                  </View>
-                </View>
+            <View style={styles.stepperRow}>
+              <Text style={styles.stepperLabel}>Days</Text>
+              <View style={styles.stepperControls}>
+                <TouchableOpacity style={styles.stepBtn} onPress={() => setDays(Math.max(1, days - 1))}>
+                  <Minus size={14} color={Colors.textPrimary} />
+                </TouchableOpacity>
+                <Text style={styles.stepVal}>{days}</Text>
+                <TouchableOpacity style={styles.stepBtn} onPress={() => setDays(Math.min(7, days + 1))}>
+                  <Plus size={14} color={Colors.textPrimary} />
+                </TouchableOpacity>
               </View>
             </View>
 
-            {/* Day Switcher Carousel */}
-            <View style={styles.daySelectorRow}>
-              {[1, 2, 3].map((day) => {
-                const isActive = activeDay === day;
+            <View style={styles.stepperRow}>
+              <Text style={styles.stepperLabel}>Travelers</Text>
+              <View style={styles.stepperControls}>
+                <TouchableOpacity
+                  style={styles.stepBtn}
+                  onPress={() => setTravelers(Math.max(1, travelers - 1))}
+                >
+                  <Minus size={14} color={Colors.textPrimary} />
+                </TouchableOpacity>
+                <Text style={styles.stepVal}>{travelers}</Text>
+                <TouchableOpacity
+                  style={styles.stepBtn}
+                  onPress={() => setTravelers(Math.min(10, travelers + 1))}
+                >
+                  <Plus size={14} color={Colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.vibeRow}>
+              {VIBES.map((v) => {
+                const active = vibe === v.id;
                 return (
                   <TouchableOpacity
-                    key={day}
-                    style={[styles.dayPill, isActive && styles.dayPillActive]}
-                    onPress={() => setActiveDay(day)}
-                    activeOpacity={0.8}
+                    key={v.id}
+                    style={[styles.vibeChip, active && styles.vibeChipActive]}
+                    onPress={() => setVibe(v.id)}
                   >
-                    <Calendar size={13} color={isActive ? Colors.textWhite : Colors.textSecondary} />
-                    <Text style={[styles.dayText, isActive && styles.dayTextActive]}>
-                      Day {day}
-                    </Text>
+                    <Text style={[styles.vibeText, active && styles.vibeTextActive]}>{v.label}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
 
-            {/* Day Items Timeline */}
-            <Text style={styles.timelineTitle}>Day {activeDay} Schedule & Local Spots</Text>
+            {error && <Text style={styles.errorText}>{error}</Text>}
 
-            <View style={styles.timelineContainer}>
-              {currentItinerary.items
-                ?.filter((item) => item.day_number === activeDay)
-                .map((item, index) => (
-                  <View key={item.id} style={styles.timelineItem}>
-                    {/* Time Dot & Line */}
-                    <View style={styles.timelineLeft}>
-                      <View style={styles.dot} />
-                      {index < 2 && <View style={styles.verticalLine} />}
-                    </View>
+            <TouchableOpacity
+              style={[styles.generateButton, loading && styles.generateButtonDisabled]}
+              onPress={handleGenerate}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={Colors.textWhite} />
+              ) : (
+                <>
+                  <Sparkles size={16} color={Colors.textWhite} />
+                  <Text style={styles.generateButtonText}>Plan my trip</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            {loading && <Text style={styles.loadingHint}>Gemini is planning your days…</Text>}
+          </View>
+        ) : (
+          <View>
+            <TouchableOpacity onPress={reset} style={styles.backRow}>
+              <Text style={styles.backText}>‹ New plan</Text>
+            </TouchableOpacity>
+            {error && <Text style={[styles.errorText, { marginBottom: 8 }]}>{error}</Text>}
+            <ItineraryResultView
+              plan={plan}
+              showSave
+              saved={savedFlag}
+              saving={saving}
+              onSave={handleSave}
+              onNewPlan={reset}
+            />
+          </View>
+        )}
 
-                    {/* Content Card */}
-                    <View style={styles.itemCard}>
-                      <View style={styles.itemHeader}>
-                        <View style={styles.categoryBadge}>
-                          {getCategoryIcon(item.category)}
-                          <Text style={styles.categoryText}>
-                            {item.category.toUpperCase()} • {item.time_of_day.toUpperCase()}
-                          </Text>
-                        </View>
-                        {item.approx_cost > 0 && (
-                          <Text style={styles.costText}>~₹{item.approx_cost}</Text>
-                        )}
-                      </View>
+        {!plan && saved.length > 0 && (
+          <View style={styles.savedSection}>
+            <Text style={styles.savedTitle}>Saved trips</Text>
+            {saved.map((item) => (
+              <TouchableOpacity key={item.id} style={styles.savedRow} onPress={() => openSaved(item)}>
+                <View style={styles.savedInfo}>
+                  <Text style={styles.savedName} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.savedMeta}>
+                    {item.region} · {item.duration_days} day{item.duration_days === 1 ? '' : 's'}
+                  </Text>
+                </View>
+                <ChevronRight size={16} color={Colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-                      <Text style={styles.placeName}>{item.place_name}</Text>
-                      <Text style={styles.placeDesc}>{item.description}</Text>
-
-                      {item.insider_tip && (
-                        <View style={styles.insiderBox}>
-                          <Text style={styles.insiderLabel}>💡 Host Insider Tip:</Text>
-                          <Text style={styles.insiderText}>{item.insider_tip}</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                ))}
-            </View>
+        {!plan && saved.length === 0 && !loading && (
+          <View style={styles.emptyWrap}>
+            <EmptyState
+              title="No trips yet"
+              description="Plan your first mountain getaway above."
+            />
           </View>
         )}
       </ScrollView>
-
-      {/* Ghumna Phirna AI Concierge Modal */}
-      <AiConciergeModal
-        visible={isAiOpen}
-        onClose={() => setIsAiOpen(false)}
-      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
+  safeArea: { flex: 1, backgroundColor: '#FFFFFF' },
+  header: { paddingHorizontal: 20, paddingTop: Platform.OS === 'android' ? 14 : 8, paddingBottom: 12 },
+  headerTitle: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
+  headerSub: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 110 },
+  plannerCard: {
+    backgroundColor: Colors.backgroundApp,
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
-  header: {
+  aiRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 14 },
+  aiLabel: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.8 },
+  fieldLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginBottom: 8 },
+  input: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: Colors.textPrimary,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  suggestionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  suggestion: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 9999, paddingHorizontal: 13, paddingVertical: 7 },
+  suggestionText: { fontSize: 12, fontWeight: '600', color: Colors.textPrimary },
+  stepperRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'android' ? 14 : 8,
-    paddingBottom: 12,
+    marginTop: 16,
   },
-  headerRightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  aiPlanButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: Colors.primaryBlack,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 9999,
-  },
-  aiPlanButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.textWhite,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-    letterSpacing: 1,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-    marginTop: 2,
-  },
-  shareButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Colors.pillInactive,
+  stepperLabel: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
+  stepperControls: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  stepBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 110,
-  },
-  heroCard: {
-    position: 'relative',
-    height: 280,
-    borderRadius: 24,
-    overflow: 'hidden',
-    marginTop: 6,
-  },
-  heroImage: {
-    width: '100%',
-    height: '100%',
-  },
-  heroOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 18,
-    backgroundColor: 'rgba(7, 16, 11, 0.78)',
-  },
-  regionTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    marginBottom: 6,
-  },
-  regionText: {
-    fontSize: 11,
-    color: Colors.textWhite,
-    fontWeight: '600',
-  },
-  heroTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.textWhite,
-    marginBottom: 4,
-  },
-  heroSummary: {
-    fontSize: 12,
-    color: '#D1D5DB',
-    lineHeight: 18,
-  },
-  heroFooter: {
-    flexDirection: 'row',
-    gap: 16,
-    marginTop: 10,
-  },
-  heroMeta: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textWhite,
-  },
-  daySelectorRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginVertical: 18,
-  },
-  dayPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+  stepVal: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, minWidth: 22, textAlign: 'center' },
+  vibeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
+  vibeChip: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 9999, paddingHorizontal: 15, paddingVertical: 9 },
+  vibeChipActive: { backgroundColor: Colors.primaryBlack, borderColor: Colors.primaryBlack },
+  vibeText: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  vibeTextActive: { color: Colors.textWhite },
+  errorText: { fontSize: 13, color: '#B91C1C', marginTop: 12, lineHeight: 18 },
+  generateButton: {
+    backgroundColor: Colors.primaryBlack,
     borderRadius: 9999,
-    backgroundColor: Colors.pillInactive,
-  },
-  dayPillActive: {
-    backgroundColor: Colors.primaryBlack,
-  },
-  dayText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  dayTextActive: {
-    color: Colors.textWhite,
-  },
-  timelineTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginBottom: 16,
-  },
-  timelineContainer: {
-    paddingLeft: 4,
-  },
-  timelineItem: {
+    paddingVertical: 15,
     flexDirection: 'row',
-    marginBottom: 16,
-  },
-  timelineLeft: {
     alignItems: 'center',
-    width: 24,
-    marginRight: 10,
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 18,
   },
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: Colors.primaryBlack,
-    marginTop: 6,
-  },
-  verticalLine: {
-    width: 2,
-    flex: 1,
-    backgroundColor: '#E5E7EB',
-    marginTop: 4,
-  },
-  itemCard: {
-    flex: 1,
+  generateButtonDisabled: { opacity: 0.7 },
+  generateButtonText: { color: Colors.textWhite, fontSize: 15, fontWeight: '700' },
+  loadingHint: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginTop: 10 },
+  backRow: { marginBottom: 12 },
+  backText: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  savedSection: { marginTop: 22 },
+  savedTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: 8 },
+  savedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: Colors.backgroundApp,
-    borderRadius: 18,
-    padding: 14,
+    borderRadius: 14,
+    padding: 13,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
-  itemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  categoryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  categoryText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: Colors.textSecondary,
-    letterSpacing: 0.5,
-  },
-  costText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  placeName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginBottom: 4,
-  },
-  placeDesc: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    lineHeight: 18,
-  },
-  insiderBox: {
-    backgroundColor: Colors.pillInactive,
-    borderRadius: 10,
-    padding: 8,
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  insiderLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.primaryBlack,
-  },
-  insiderText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    lineHeight: 16,
-    marginTop: 2,
-  },
+  savedInfo: { flex: 1 },
+  savedName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  savedMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  emptyWrap: { marginTop: 8 },
 });

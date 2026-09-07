@@ -8,12 +8,11 @@ import {
   TextInput,
   SafeAreaView,
   ActivityIndicator,
-  Alert,
   Platform,
   KeyboardAvoidingView,
   ScrollView,
 } from 'react-native';
-import { X, ShieldCheck, KeyRound, CheckCircle2, AlertCircle, Sparkles, Building2 } from 'lucide-react-native';
+import { X, ShieldCheck, KeyRound, CheckCircle2, AlertCircle, Building2 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import { generateAadhaarOtp, verifyAadhaarOtp, AadhaarVerifyResult } from '../lib/sandbox-kyc';
 
@@ -66,7 +65,7 @@ export function AadhaarKycModal({
     setError(null);
     const cleanNumber = aadhaarInput.replace(/\s+/g, '');
     if (cleanNumber.length !== 12) {
-      setError('Please enter a valid 12-digit Aadhaar number.');
+      setError('Enter a valid 12-digit Aadhaar number.');
       return;
     }
 
@@ -78,25 +77,14 @@ export function AadhaarKycModal({
       setReferenceId(res.referenceId);
       setStep('otp');
     } else {
-      // In sandbox mode or live rate-limit test fallback
-      if (res.message.includes('400') || res.message.includes('permission') || res.message.includes('test')) {
-        // Provide seamless live simulated reference for UI testing
-        setReferenceId('ref_sbox_' + Date.now());
-        setStep('otp');
-        Alert.alert(
-          'Sandbox OTP Triggered',
-          'Sandbox Mode: An OTP request was initiated with UIDAI. Enter OTP "123456" for sandbox testing.'
-        );
-      } else {
-        setError(res.message);
-      }
+      setError(res.message);
     }
   };
 
   const handleVerifyOtp = async () => {
     setError(null);
-    if (!otpInput.trim() || otpInput.trim().length < 4) {
-      setError('Please enter the verification OTP received on your mobile.');
+    if (!otpInput.trim() || otpInput.trim().length < 6) {
+      setError('Enter the 6-digit OTP sent to your UIDAI-linked mobile.');
       return;
     }
 
@@ -109,24 +97,7 @@ export function AadhaarKycModal({
       setStep('success');
       onVerified(res);
     } else {
-      // If sandbox demo code
-      if (otpInput.trim() === '123456' || otpInput.trim().length === 6) {
-        const cleanNumber = aadhaarInput.replace(/\s+/g, '');
-        const mockResult: AadhaarVerifyResult = {
-          success: true,
-          referenceId,
-          name: userType === 'host' ? 'Roman Vance' : 'Rahul Sharma',
-          dob: '1992-08-15',
-          gender: 'M',
-          maskedAadhaar: `XXXX-XXXX-${cleanNumber.slice(-4) || '9281'}`,
-          address: 'Village Vashisht, Manali, Himachal Pradesh - 175103',
-        };
-        setKycResult(mockResult);
-        setStep('success');
-        onVerified(mockResult);
-      } else {
-        setError(res.error || 'Invalid OTP. Please verify and try again.');
-      }
+      setError(res.error || 'Invalid OTP. Try again.');
     }
   };
 
@@ -156,9 +127,7 @@ export function AadhaarKycModal({
                 {/* Government & Legal Compliance Banner */}
                 <View style={styles.govBadgeBanner}>
                   <Building2 size={16} color="#1E40AF" />
-                  <Text style={styles.govBadgeText}>
-                    Powered by UIDAI & HP Police Form-C Digital Registry
-                  </Text>
+                  <Text style={styles.govBadgeText}>UIDAI verification</Text>
                 </View>
 
                 {error && (
@@ -170,9 +139,9 @@ export function AadhaarKycModal({
 
                 {step === 'aadhaar' && (
                   <View>
-                    <Text style={styles.sectionHeading}>Enter Aadhaar Number</Text>
+                    <Text style={styles.sectionHeading}>Aadhaar number</Text>
                     <Text style={styles.sectionDesc}>
-                      A one-time OTP will be sent to the mobile number registered with your UIDAI Aadhaar record.
+                      OTP goes to your UIDAI-linked mobile number.
                     </Text>
 
                     <Text style={styles.fieldLabel}>12-Digit Aadhaar</Text>
@@ -189,7 +158,7 @@ export function AadhaarKycModal({
                     <View style={styles.privacyGuarantee}>
                       <ShieldCheck size={14} color="#059669" />
                       <Text style={styles.privacyText}>
-                        End-to-end encrypted. We never store raw Aadhaar numbers, adhering to UIDAI & RBI escrow guidelines.
+                        Raw numbers are never stored.
                       </Text>
                     </View>
 

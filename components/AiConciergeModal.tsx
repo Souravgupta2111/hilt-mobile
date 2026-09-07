@@ -11,20 +11,9 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import {
-  X,
-  Sparkles,
-  Compass,
-  MapPin,
-  Send,
-  AlertTriangle,
-  Clock,
-  Utensils,
-  Footprints,
-  Eye,
-  CheckCircle2,
-} from 'lucide-react-native';
+import { X, Sparkles } from 'lucide-react-native';
 import { generateMountainItinerary, GeneratedItinerary } from '../lib/ai-concierge';
+import { ItineraryResultView } from './ItineraryResultView';
 import { Colors } from '../constants/theme';
 
 interface AiConciergeModalProps {
@@ -93,13 +82,9 @@ export function AiConciergeModal({
             <>
               {/* Intro Card */}
               <View style={styles.introCard}>
-                <Text style={styles.introKicker}>POWERED BY GEMINI 2.0 FLASH</Text>
-                <Text style={styles.introTitle}>
-                  Curate your slow mountain days with authentic local secrets.
-                </Text>
-                <Text style={styles.introSub}>
-                  No tourist traps. Only deodar forest hikes, steamed walnut siddu dhabas, verified fiber Wi-Fi, and real road advice.
-                </Text>
+                <Text style={styles.introKicker}>AI CONCIERGE</Text>
+                <Text style={styles.introTitle}>Plan slow mountain days.</Text>
+                <Text style={styles.introSub}>Local food, hikes, and road advice for your valley.</Text>
               </View>
 
               {/* Valley Selector */}
@@ -173,66 +158,7 @@ export function AiConciergeModal({
               </TouchableOpacity>
             </>
           ) : (
-            /* Result View */
-            <View>
-              <View style={styles.resultBanner}>
-                <View style={styles.badgeRow}>
-                  <View style={styles.valleyBadge}>
-                    <MapPin size={11} color={Colors.textWhite} />
-                    <Text style={styles.valleyBadgeText}>{result.valley}</Text>
-                  </View>
-                  <Text style={styles.costBadge}>Est. ₹{result.estimatedCostInr.toLocaleString('en-IN')}</Text>
-                </View>
-                <Text style={styles.resultTitle}>{result.title}</Text>
-                <Text style={styles.resultSummary}>{result.summary}</Text>
-              </View>
-
-              {/* Road Advisory Strip */}
-              {result.roadAdvisory && (
-                <View style={styles.roadAdvisoryCard}>
-                  <AlertTriangle size={15} color="#D97706" />
-                  <Text style={styles.roadAdvisoryText}>
-                    <Text style={{ fontWeight: '700' }}>Road Alert: </Text>
-                    {result.roadAdvisory}
-                  </Text>
-                </View>
-              )}
-
-              {/* Days Timeline */}
-              {result.days.map((day) => (
-                <View key={day.dayNumber} style={styles.dayCard}>
-                  <View style={styles.dayHeader}>
-                    <Text style={styles.dayNum}>DAY {day.dayNumber}</Text>
-                    <Text style={styles.dayTheme}>{day.theme}</Text>
-                  </View>
-
-                  <View style={styles.activitiesList}>
-                    {day.activities.map((act, idx) => (
-                      <View key={idx} style={styles.activityItem}>
-                        <View style={styles.activityTimeRow}>
-                          <Clock size={11} color={Colors.textWhite} />
-                          <Text style={styles.activityTime}>{act.time}</Text>
-                        </View>
-                        <Text style={styles.activityTitle}>{act.title}</Text>
-                        <Text style={styles.activityDesc}>{act.description}</Text>
-                        {act.insiderTip && (
-                          <View style={styles.tipBox}>
-                            <Text style={styles.tipText}>💡 {act.insiderTip}</Text>
-                          </View>
-                        )}
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              ))}
-
-              <TouchableOpacity
-                style={styles.anotherBtn}
-                onPress={() => setResult(null)}
-              >
-                <Text style={styles.anotherBtnText}>← Plan Another Itinerary</Text>
-              </TouchableOpacity>
-            </View>
+            <ItineraryResultView plan={result} onNewPlan={() => setResult(null)} />
           )}
         </ScrollView>
       </SafeAreaView>
@@ -404,145 +330,6 @@ const styles = StyleSheet.create({
   generateButtonText: {
     color: Colors.textWhite,
     fontSize: 15,
-    fontWeight: '700',
-  },
-  resultBanner: {
-    backgroundColor: '#0F1419',
-    borderRadius: 22,
-    padding: 18,
-    marginBottom: 14,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  valleyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  valleyBadgeText: {
-    fontSize: 11,
-    color: Colors.textWhite,
-    fontWeight: '600',
-  },
-  costBadge: {
-    fontSize: 12,
-    color: Colors.textWhite,
-    fontWeight: '700',
-  },
-  resultTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.textWhite,
-    marginBottom: 6,
-  },
-  resultSummary: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    lineHeight: 18,
-  },
-  roadAdvisoryCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: Colors.pillInactive,
-    padding: 12,
-    borderRadius: 14,
-    marginBottom: 14,
-  },
-  roadAdvisoryText: {
-    fontSize: 11,
-    color: Colors.textPrimary,
-    lineHeight: 16,
-    flex: 1,
-  },
-  dayCard: {
-    backgroundColor: Colors.backgroundApp,
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  dayHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  dayNum: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.textWhite,
-    backgroundColor: '#0F1419',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  dayTheme: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    flex: 1,
-  },
-  activitiesList: {
-    gap: 12,
-  },
-  activityItem: {
-    borderLeftWidth: 2,
-    borderLeftColor: '#E5E7EB',
-    paddingLeft: 10,
-  },
-  activityTimeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 2,
-  },
-  activityTime: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  activityTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  activityDesc: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  tipBox: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 8,
-    padding: 6,
-    marginTop: 4,
-  },
-  tipText: {
-    fontSize: 10,
-    color: Colors.textPrimary,
-    fontStyle: 'italic',
-  },
-  anotherBtn: {
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-  anotherBtnText: {
-    fontSize: 13,
-    color: Colors.textPrimary,
     fontWeight: '700',
   },
 });

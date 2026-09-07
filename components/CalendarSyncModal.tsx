@@ -9,158 +9,92 @@ import {
   SafeAreaView,
   ScrollView,
   Alert,
-  Clipboard,
+  ActivityIndicator,
 } from 'react-native';
-import { X, Calendar, RefreshCw, Copy, Check, ShieldCheck, Link2 } from 'lucide-react-native';
+import { X } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 
 interface CalendarSyncModalProps {
   visible: boolean;
+  propertyId: string;
   propertyTitle: string;
   onClose: () => void;
 }
 
-export function CalendarSyncModal({
-  visible,
-  propertyTitle,
-  onClose,
-}: CalendarSyncModalProps) {
-  const [airbnbUrl, setAirbnbUrl] = useState(
-    'https://www.airbnb.com/calendar/ical/89120491.ics?s=340192a'
-  );
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+export function CalendarSyncModal({ visible, propertyId, propertyTitle, onClose }: CalendarSyncModalProps) {
+  const [icalUrl, setIcalUrl] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSynced, setLastSynced] = useState('2 minutes ago');
-  const [copied, setCopied] = useState(false);
+  const [lastResult, setLastResult] = useState<string | null>(null);
 
-  const hiltExportUrl = `https://eccqfucljzppqomaiwgp.supabase.co/functions/v1/ical-export?property_id=c0000000-0000-0000-0000-000000000001`;
+  const exportUrl = SUPABASE_URL && propertyId
+    ? `${SUPABASE_URL}/functions/v1/ical-export?property_id=${propertyId}`
+    : '';
 
-  const handleSyncNow = () => {
+  const handleSync = async () => {
+    if (!icalUrl.trim() || !propertyId) {
+      Alert.alert('Add a feed', 'Paste an Airbnb / MMT iCal URL first.');
+      return;
+    }
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      Alert.alert('Not configured', 'Calendar sync is unavailable in this build.');
+      return;
+    }
     setIsSyncing(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/ical-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY },
+        body: JSON.stringify({ property_id: propertyId, ical_url: icalUrl.trim(), source: 'airbnb' }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `Sync failed (${res.status})`);
+      setLastResult(`${data.events_synced ?? 0} dates synced`);
+    } catch (e: any) {
+      Alert.alert('Sync failed', e.message || 'Try again.');
+    } finally {
       setIsSyncing(false);
-      setLastSynced('Just now');
-      Alert.alert(
-        'iCal Calendars Synced! 🔄',
-        'Successfully pulled 6 blocked dates from Airbnb. Your Hilt calendar is 100% updated with zero double-booking risk.'
-      );
-    }, 1100);
-  };
-
-  const handleCopyExportUrl = () => {
-    Clipboard.setString(hiltExportUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    Alert.alert('Copied to Clipboard', 'Paste this URL into your Airbnb / MakeMyTrip "Import Calendar" setting.');
+    }
   };
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
       <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
             <X size={20} color={Colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>2-Way Calendar Sync</Text>
+          <Text style={styles.headerTitle}>Calendar sync</Text>
           <View style={{ width: 36 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Subheader */}
-          <Text style={styles.propertyTitle}>{propertyTitle}</Text>
-          <Text style={styles.subtitle}>
-            Keep your Airbnb, MakeMyTrip, and Hilt calendars in real-time sync. Never worry about double bookings while enjoying Hilt's 2% low fee.
-          </Text>
+        <ScrollView contentContainerStyle={styles.content}>
+          <Text style={styles.propertyTitle}>{propertyTitle || 'Your listing'}</Text>
+          <Text style={styles.subtitle}>Import external bookings, export Hilt availability.</Text>
 
-          {/* Section 1: Import Airbnb Calendar */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Link2 size={18} color={Colors.primaryBlack} />
-                <Text style={styles.cardTitle}>1. Import Airbnb Calendar (.ics)</Text>
-              </View>
-              <View style={styles.activeTag}>
-                <Text style={styles.activeTagText}>Active Sync</Text>
-              </View>
-            </View>
+          <Text style={styles.fieldLabel}>Import iCal URL</Text>
+          <TextInput
+            style={styles.input}
+            value={icalUrl}
+            onChangeText={setIcalUrl}
+            placeholder="https://…/calendar.ics"
+            autoCapitalize="none"
+            placeholderTextColor={Colors.textMuted}
+          />
+          <TouchableOpacity style={styles.syncBtn} onPress={handleSync} disabled={isSyncing}>
+            {isSyncing ? (
+              <ActivityIndicator color={Colors.textWhite} />
+            ) : (
+              <Text style={styles.syncBtnText}>Sync now</Text>
+            )}
+          </TouchableOpacity>
+          {lastResult ? <Text style={styles.result}>{lastResult}</Text> : null}
 
-            <Text style={styles.fieldLabel}>Airbnb iCal Export URL</Text>
-            <TextInput
-              style={styles.input}
-              value={airbnbUrl}
-              onChangeText={setAirbnbUrl}
-              placeholder="https://www.airbnb.com/calendar/ical/..."
-              placeholderTextColor={Colors.textMuted}
-              autoCapitalize="none"
-            />
-
-            <View style={styles.syncStatusRow}>
-              <Text style={styles.syncStatusText}>Last synced: {lastSynced}</Text>
-              <TouchableOpacity
-                style={styles.syncNowBtn}
-                onPress={handleSyncNow}
-                disabled={isSyncing}
-                activeOpacity={0.8}
-              >
-                <RefreshCw size={14} color={Colors.textWhite} />
-                <Text style={styles.syncNowBtnText}>
-                  {isSyncing ? 'Syncing...' : 'Sync Now'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Section 2: Export Hilt Calendar to Airbnb */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Calendar size={18} color={Colors.primaryBlack} />
-                <Text style={styles.cardTitle}>2. Export Hilt Calendar to Airbnb</Text>
-              </View>
-            </View>
-
-            <Text style={styles.fieldLabel}>Your Unique Hilt iCal Feed</Text>
-            <View style={styles.exportRow}>
-              <TextInput
-                style={[styles.input, { flex: 1, marginBottom: 0, fontSize: 11 }]}
-                value={hiltExportUrl}
-                editable={false}
-              />
-              <TouchableOpacity
-                style={[styles.copyBtn, copied && { backgroundColor: '#15803D' }]}
-                onPress={handleCopyExportUrl}
-                activeOpacity={0.8}
-              >
-                {copied ? (
-                  <Check size={16} color={Colors.textWhite} />
-                ) : (
-                  <Copy size={16} color={Colors.textWhite} />
-                )}
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.instructionText}>
-              Paste this link into Airbnb Dashboard → Calendar → Import Calendar so dates booked on Hilt are blocked on Airbnb automatically.
-            </Text>
-          </View>
-
-          {/* Simulated Synchronized Calendar Legend */}
-          <View style={styles.legendCard}>
-            <Text style={styles.legendTitle}>CALENDAR SYNC STATUS</Text>
-            <View style={styles.legendRow}>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: Colors.textWhite }]} />
-                <Text style={styles.legendText}>Hilt Bookings (2% Fee)</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
-                <Text style={styles.legendText}>Blocked via Airbnb</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#22C55E' }]} />
-                <Text style={styles.legendText}>Available</Text>
-              </View>
-            </View>
+          <Text style={[styles.fieldLabel, { marginTop: 20 }]}>Export Hilt feed</Text>
+          <View style={styles.exportRow}>
+            <Text style={styles.exportUrl} selectable>{exportUrl || 'Unavailable'}</Text>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -169,10 +103,7 @@ export function CalendarSyncModal({
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.surfaceLight,
-  },
+  safeArea: { flex: 1, backgroundColor: Colors.surfaceLight },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -190,148 +121,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  content: {
-    paddingHorizontal: 22,
-    paddingVertical: 20,
-  },
-  propertyTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    lineHeight: 19,
-    marginTop: 6,
-    marginBottom: 24,
-  },
-  card: {
-    backgroundColor: Colors.backgroundApp,
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginBottom: 16,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  activeTag: {
-    backgroundColor: '#DCFCE7',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  activeTagText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#15803D',
-  },
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-    marginBottom: 6,
-  },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
+  content: { paddingHorizontal: 20, paddingVertical: 18 },
+  propertyTitle: { fontSize: 19, fontWeight: '800', color: Colors.textPrimary },
+  subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 4, marginBottom: 18 },
+  fieldLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginBottom: 8 },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 13,
     color: Colors.textPrimary,
-    marginBottom: 12,
   },
-  syncStatusRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  syncStatusText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-  },
-  syncNowBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  syncBtn: {
     backgroundColor: Colors.primaryBlack,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
     borderRadius: 9999,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 12,
   },
-  syncNowBtnText: {
-    color: Colors.textWhite,
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  syncBtnText: { color: Colors.textWhite, fontSize: 14, fontWeight: '700' },
+  result: { fontSize: 13, color: '#15803D', fontWeight: '600', marginTop: 10 },
   exportRow: {
     flexDirection: 'row',
+    gap: 10,
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    backgroundColor: Colors.backgroundApp,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
-  copyBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: Colors.primaryBlack,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  instructionText: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    lineHeight: 16,
-  },
-  legendCard: {
-    backgroundColor: '#0F1419',
-    borderRadius: 18,
-    padding: 16,
-    marginTop: 8,
-  },
-  legendTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.textWhite,
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  legendText: {
-    fontSize: 12,
-    color: Colors.textWhite,
-    fontWeight: '500',
-  },
+  exportUrl: { flex: 1, fontSize: 11, color: Colors.textSecondary },
+  copyBtn: { backgroundColor: Colors.primaryBlack, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9999 },
+  copyText: { color: Colors.textWhite, fontSize: 12, fontWeight: '700' },
 });

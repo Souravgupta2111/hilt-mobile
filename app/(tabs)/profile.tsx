@@ -1,443 +1,605 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  Image,
   TouchableOpacity,
   Platform,
+  RefreshControl,
   Alert,
 } from 'react-native';
+import { Plus, Trash2, ShieldCheck, FileText, Umbrella } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import { getOrCreateConversation } from '../../lib/chat';
 import {
-  Settings,
-  Star,
-  Users,
-  Home,
-  Plus,
-  ShieldCheck,
-  TrendingUp,
-  Sparkles,
-  CheckCircle2,
-  Calendar,
-  Wallet,
-  ArrowRight,
-  RefreshCw,
-} from 'lucide-react-native';
-import { getHostProfile, getProperties, getHostStats, getTravelerBookings } from '../../lib/supabase';
+  getCurrentUserProfile,
+  getHostProperties,
+  getHostBookings,
+  getHostStats,
+  getHostPayouts,
+  approveBooking,
+  declineBooking,
+  getHostReviewedBookingIds,
+  getGuestReviews,
+  type HostPayoutRow,
+  signOut,
+  deleteCurrentUserAccount,
+} from '../../lib/supabase';
+import { LegalModal, type LegalDoc } from '../../components/LegalModal';
+import { ReviewGuestModal } from '../../components/ReviewGuestModal';
+import { requestPush } from '../../lib/push';
 import { Profile, Property, Booking } from '../../types/database';
 import { PropertyGridCard } from '../../components/PropertyGridCard';
+import { PayoutSettingsModal } from '../../components/PayoutSettingsModal';
 import { AddPropertyModal } from '../../components/AddPropertyModal';
 import { CalendarSyncModal } from '../../components/CalendarSyncModal';
+import { AvailabilityManager } from '../../components/AvailabilityManager';
+import { SafetyQueue } from '../../components/SafetyQueue';
 import { AuthModal } from '../../components/AuthModal';
-import { AadhaarBadge } from '../../components/AadhaarBadge';
-import { AadhaarKycModal } from '../../components/AadhaarKycModal';
+import { EmptyState } from '../../components/EmptyState';
 import { Colors } from '../../constants/theme';
+import { t, LOCALES, type Locale } from '../../lib/i18n';
+import { useLocale } from '../../lib/locale';
+import { getWishlist, toggleWishlist } from '../../lib/supabase';
 
 export default function ProfileScreen() {
+  const router = useRouter();
+  const [locale, setLocaleState] = useLocale();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
-  const [stats, setStats] = useState<any>(null);
   const [hostBookings, setHostBookings] = useState<Booking[]>([]);
-  const [activeSegment, setActiveSegment] = useState<'Listing' | 'Bookings' | 'Insights'>('Listing');
+  const [stats, setStats] = useState<Awaited<ReturnType<typeof getHostStats>> | null>(null);
+  const [payouts, setPayouts] = useState<HostPayoutRow[]>([]);
+  const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
+  const [guestReviews, setGuestReviews] = useState<any[]>([]);
+  const [reviewTarget, setReviewTarget] = useState<Booking | null>(null);
+  const [saved, setSaved] = useState<Property[]>([]);
+  const [activeSegment, setActiveSegment] = useState<'Listing' | 'Bookings' | 'Saved' | 'Insights'>('Listing');
+  const [isPayoutOpen, setIsPayoutOpen] = useState(false);
   const [isAddPropertyOpen, setIsAddPropertyOpen] = useState(false);
   const [isCalendarSyncOpen, setIsCalendarSyncOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isKycModalOpen, setIsKycModalOpen] = useState(false);
-  const [verifiedKyc, setVerifiedKyc] = useState<{ name?: string; maskedAadhaar?: string } | null>(null);
+  const [availabilityFor, setAvailabilityFor] = useState<Property | null>(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account?',
+      'This will permanently erase your profile, saved stays, and all personal data in accordance with the DPDP Act 2023 and Apple Guideline 5.1.1(v). This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            setIsDeleting(true);
+            try {
+              await deleteCurrentUserAccount();
+              Alert.alert('Account Deleted', 'Your account and personal data have been permanently erased.');
+              await load();
+            } catch (err: any) {
+              Alert.alert(
+                'Deletion Failed',
+                err.message || 'Could not delete account. Please try again or contact privacy@hilt.travel.'
+              );
+            } finally {
+              setIsDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const load = useCallback(async () => {
+    const p = await getCurrentUserProfile();
+    setProfile(p);
+    if (p) {
+      const [props, bookings, s, wishlist, ledger, reviewed, received] = await Promise.all([
+        getHostProperties(p.id),
+        getHostBookings(p.id),
+        getHostStats(p.id),
+        getWishlist(),
+        getHostPayouts(p.id),
+        getHostReviewedBookingIds(p.id),
+        getGuestReviews(p.id),
+      ]);
+      setProperties(props);
+      setHostBookings(bookings);
+      setStats(s);
+      setSaved(wishlist);
+      setPayouts(ledger);
+      setReviewedIds(reviewed);
+      setGuestReviews(received);
+    } else {
+      setProperties([]);
+      setHostBookings([]);
+      setStats(null);
+      setSaved([]);
+      setPayouts([]);
+      setReviewedIds(new Set());
+      setGuestReviews([]);
+    }
+  }, []);
 
   useEffect(() => {
-    getHostProfile().then((data) => setProfile(data));
-    getProperties().then((data) => setProperties(data));
-    getHostStats().then((data) => setStats(data));
-    getTravelerBookings().then((data) => setHostBookings(data));
-  }, []);
+    load();
+  }, [load]);
+
+  const initials = profile?.full_name
+    ? profile.full_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+    : '?';
+
+  if (!profile) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.center}>
+          <EmptyState
+            title="You're logged out"
+            description="Sign in to manage listings, bookings, and payouts."
+            actionText="Sign in"
+            onAction={() => setIsAuthOpen(true)}
+          />
+          <AuthModal
+            visible={isAuthOpen}
+            onClose={() => setIsAuthOpen(false)}
+            onSuccess={() => load()}
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* Top Header (Ditto Mockup Exact) */}
       <View style={styles.header}>
-        <View style={{ width: 40 }} />
-        <Text style={styles.headerTitle}>Agent profile</Text>
+        <Text style={styles.headerTitle}>Profile</Text>
         <TouchableOpacity
-          style={styles.settingsButton}
-          onPress={() => setIsAuthModalOpen(true)}
-          activeOpacity={0.8}
+          onPress={async () => {
+            await signOut();
+            load();
+          }}
         >
-          <Settings size={20} color={Colors.textPrimary} />
+          <Text style={styles.signOut}>Log out</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Profile Card Row */}
-        <View style={styles.profileRow}>
-          <Image
-            source={{
-              uri:
-                profile?.avatar_url ||
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              await load();
+              setRefreshing(false);
             }}
-            style={styles.avatar}
           />
-          <View style={styles.profileInfo}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.profileName}>{verifiedKyc?.name || profile?.full_name || 'Abdur rob'}</Text>
-              <ShieldCheck size={16} color="#15803D" />
-            </View>
-            <Text style={styles.profileEmail}>
-              {profile?.email || 'aritbd2020@gmail.com'}
-            </Text>
-            <TouchableOpacity
-              onPress={() => setIsKycModalOpen(true)}
-              activeOpacity={0.7}
-              style={{ marginTop: 4, alignSelf: 'flex-start' }}
-            >
-              <AadhaarBadge
-                label={verifiedKyc ? `Verified (${verifiedKyc.maskedAadhaar})` : "Aadhaar Verified Host"}
-                size="small"
-              />
-            </TouchableOpacity>
+        }
+      >
+        <View style={styles.profileRow}>
+          <View style={styles.avatarFallback}>
+            <Text style={styles.avatarText}>{initials}</Text>
           </View>
-
-          <TouchableOpacity style={styles.editProfileButton} activeOpacity={0.8}>
-            <Text style={styles.editProfileText}>Edit profile</Text>
-          </TouchableOpacity>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{profile.full_name}</Text>
+            <Text style={styles.profileEmail}>{profile.email || profile.phone || profile.role}</Text>
+          </View>
         </View>
 
-        {/* 3 Stats Badges (Ditto Mockup Exact) */}
+        <View style={styles.localeRow}>
+          {LOCALES.map((l) => (
+            <TouchableOpacity
+              key={l}
+              style={[styles.localeChip, locale === l && styles.localeChipActive]}
+              onPress={() => setLocaleState(l as Locale)}
+              accessibilityRole="button"
+              accessibilityLabel={`Language ${l}`}
+            >
+              <Text style={[styles.localeText, locale === l && styles.localeTextActive]}>
+                {l === 'en' ? 'English' : 'हिन्दी'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
-            <View style={styles.statIconBadge}>
-              <Star size={16} color="#F59E0B" fill="#F59E0B" />
-            </View>
-            <Text style={styles.statValue}>5.00</Text>
+            <Text style={styles.statValue}>{Number(profile.rating || 0).toFixed(2)}</Text>
             <Text style={styles.statLabel}>Rating</Text>
           </View>
-
           <View style={styles.statBox}>
-            <View style={styles.statIconBadge}>
-              <Users size={16} color={Colors.textPrimary} />
-            </View>
-            <Text style={styles.statValue}>200</Text>
+            <Text style={styles.statValue}>{profile.reviews_count}</Text>
             <Text style={styles.statLabel}>Reviews</Text>
           </View>
-
           <View style={styles.statBox}>
-            <View style={styles.statIconBadge}>
-              <Home size={16} color={Colors.textPrimary} />
-            </View>
-            <Text style={styles.statValue}>100</Text>
-            <Text style={styles.statLabel}>Sold</Text>
+            <Text style={styles.statValue}>{stats?.bookingsCount ?? 0}</Text>
+            <Text style={styles.statLabel}>Bookings</Text>
           </View>
         </View>
 
-        {/* Segmented Control Pill (Ditto Mockup Exact) */}
-        <View style={styles.segmentedContainer}>
-          <TouchableOpacity
-            style={[
-              styles.segmentPill,
-              activeSegment === 'Listing' && styles.segmentPillActive,
-            ]}
-            onPress={() => setActiveSegment('Listing')}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                activeSegment === 'Listing' && styles.segmentTextActive,
-              ]}
-            >
-              Listing
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.segmentPill,
-              activeSegment === 'Bookings' && styles.segmentPillActive,
-            ]}
-            onPress={() => setActiveSegment('Bookings')}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                activeSegment === 'Bookings' && styles.segmentTextActive,
-              ]}
-            >
-              Bookings
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.segmentPill,
-              activeSegment === 'Insights' && styles.segmentPillActive,
-            ]}
-            onPress={() => setActiveSegment('Insights')}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                activeSegment === 'Insights' && styles.segmentTextActive,
-              ]}
-            >
-              Insights
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tab 1: Listing View (2-Column Property Grid) */}
-        {activeSegment === 'Listing' && (
-          <View>
-            {/* 2-Way Calendar Sync Banner */}
-            <TouchableOpacity
-              style={styles.calendarSyncCard}
-              onPress={() => setIsCalendarSyncOpen(true)}
-              activeOpacity={0.88}
-            >
-              <View style={styles.calendarSyncLeft}>
-                <View style={styles.syncTagRow}>
-                  <RefreshCw size={12} color="#15803D" />
-                  <Text style={styles.syncTagText}>2-Way iCal Sync Active</Text>
-                </View>
-                <Text style={styles.calendarSyncTitle}>
-                  Sync Airbnb & MakeMyTrip Calendars
+        {guestReviews.length > 0 && (
+          <View style={styles.hostSayBox}>
+            <Text style={styles.subSectionTitle}>What hosts say</Text>
+            {guestReviews.slice(0, 3).map((r) => (
+              <View key={r.id} style={styles.hostSayCard}>
+                <Text style={styles.hostSayMeta}>
+                  ★ {r.rating} · {r.host?.full_name || 'Host'}
                 </Text>
-                <Text style={styles.calendarSyncSub}>
-                  Auto-blocks booked dates across channels • Zero double-booking risk
+                <Text style={styles.hostSayText} numberOfLines={3}>
+                  {r.comment}
                 </Text>
               </View>
-              <View style={styles.syncBtnSmall}>
-                <Text style={styles.syncBtnSmallText}>Sync iCal</Text>
-              </View>
-            </TouchableOpacity>
-
-            {/* Top Action Row: Add Property Button */}
-            <View style={styles.actionHeaderRow}>
-              <Text style={styles.subSectionTitle}>Active Homestays & Villas</Text>
-              <TouchableOpacity
-                style={styles.addPropertySmallBtn}
-                onPress={() => setIsAddPropertyOpen(true)}
-                activeOpacity={0.85}
-              >
-                <Plus size={15} color={Colors.textWhite} />
-                <Text style={styles.addPropertySmallText}>Add Property</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* 2-Column Property Grid matching Mockup */}
-            <View style={styles.gridContainer}>
-              {properties.map((property) => (
-                <PropertyGridCard
-                  key={property.id}
-                  property={property}
-                  onPress={() => {}}
-                />
-              ))}
-            </View>
-            <TouchableOpacity
-              style={styles.addPropertyInlineBtn}
-              onPress={() => setIsAddPropertyOpen(true)}
-              activeOpacity={0.88}
-            >
-              <Plus size={18} color={Colors.textWhite} />
-              <Text style={styles.addPropertyInlineText}>Start Hosting / Add Property</Text>
-            </TouchableOpacity>
+            ))}
           </View>
         )}
 
-        {/* Tab 2: Bookings View */}
-        {activeSegment === 'Bookings' && (
-          <View style={styles.bookingsContainer}>
-            <Text style={styles.subSectionTitle}>Incoming Reservations</Text>
+        <View style={styles.segmentedContainer}>
+          {(['Listing', 'Bookings', 'Saved', 'Insights'] as const).map((s) => (
+            <TouchableOpacity
+              key={s}
+              style={[styles.segmentPill, activeSegment === s && styles.segmentPillActive]}
+              onPress={() => setActiveSegment(s)}
+            >
+              <Text style={[styles.segmentText, activeSegment === s && styles.segmentTextActive]}>{s}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-            {hostBookings.length === 0 ? (
-              <View style={styles.emptyBookingsCard}>
-                <Text style={styles.emptyBookingsTitle}>No Incoming Reservations</Text>
-                <Text style={styles.emptyBookingsSub}>
-                  Your mountain listings are active. New guest reservations will appear here with automated 98% Escrow payouts.
-                </Text>
+        {activeSegment === 'Listing' && (
+          <View>
+            <View style={styles.actionHeaderRow}>
+              <Text style={styles.subSectionTitle}>Your listings</Text>
+              <TouchableOpacity style={styles.addBtn} onPress={() => setIsAddPropertyOpen(true)}>
+                <Plus size={14} color={Colors.textWhite} />
+                <Text style={styles.addBtnText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+            {properties.length === 0 ? (
+              <EmptyState
+                title="No listings"
+                description="Publish your first stay to start receiving bookings."
+                actionText="Add property"
+                onAction={() => setIsAddPropertyOpen(true)}
+              />
+            ) : (
+              <View style={styles.gridContainer}>
+                {properties.map((property) => (
+                  <PropertyGridCard key={property.id} property={property} onPress={() => {}} />
+                ))}
               </View>
+            )}
+            {properties.length > 0 && (
+              <View style={{ marginTop: 6 }}>
+                <Text style={styles.subSectionTitle}>Availability</Text>
+                {properties.map((property) => (
+                  <TouchableOpacity
+                    key={property.id}
+                    style={styles.availRow}
+                    onPress={() => setAvailabilityFor(property)}
+                  >
+                    <Text style={styles.availTitle} numberOfLines={1}>
+                      {property.title}
+                    </Text>
+                    <Text style={styles.availLink}>Manage dates</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            {properties.length > 0 && (
+              <TouchableOpacity style={styles.syncRow} onPress={() => setIsCalendarSyncOpen(true)}>
+                <Text style={styles.syncText}>Calendar sync</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {activeSegment === 'Bookings' && (
+          <View>
+            <Text style={styles.subSectionTitle}>Reservations</Text>
+            {hostBookings.length === 0 ? (
+              <EmptyState title="No reservations" description="New guest bookings will appear here." />
             ) : (
               hostBookings.map((b) => (
                 <View key={b.id} style={styles.bookingCard}>
-                  <View style={styles.bookingHeaderRow}>
-                    <View>
-                      <Text style={styles.bookingGuestName}>{b.traveler?.full_name || 'Himalayan Traveler'}</Text>
-                      <View style={{ marginTop: 2 }}>
-                        <AadhaarBadge label="Aadhaar Verified Guest" size="small" />
-                      </View>
-                    </View>
-                    <View style={styles.confirmedBadge}>
-                      <Text style={styles.confirmedText}>Confirmed</Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.bookingStay}>
-                    {b.property?.title || 'Mountain Stay'} • {b.total_nights} Nights
-                  </Text>
+                  <Text style={styles.bookingGuest}>{b.property?.title || 'Stay'}</Text>
                   <Text style={styles.bookingDates}>
-                    {b.check_in} – {b.check_out} • {b.guests_count} Guests
+                    {b.check_in} → {b.check_out} · {b.guests_count} guests · {b.status}
                   </Text>
-
-                  <View style={styles.payoutStrip}>
-                    <Text style={styles.payoutLabel}>Net Host Payout (2% fee deducted):</Text>
-                    <Text style={styles.payoutVal}>₹{(b.subtotal - b.platform_fee).toLocaleString('en-IN')}</Text>
-                  </View>
-
-                  <View style={styles.bookingActionsRow}>
-                    <TouchableOpacity
-                      style={styles.bookingActionBtn}
-                      onPress={() =>
-                        Alert.alert(
-                          'Digital Guest Register',
-                          `HP Police Form-C generated for ${b.traveler?.full_name || 'Guest'}.\nAadhaar: Verified.\nArrival Date: ${b.check_in}.`
-                        )
+                  <Text style={styles.payoutVal}>
+                    ₹{(b.subtotal - b.platform_fee).toLocaleString('en-IN')} net
+                  </Text>
+                  <Text style={styles.feeLine}>
+                    ₹{b.subtotal.toLocaleString('en-IN')} − ₹{b.platform_fee.toLocaleString('en-IN')} Hilt fee (2%)
+                  </Text>
+                  {b.status === 'completed' && !reviewedIds.has(b.id) && (
+                    <TouchableOpacity style={styles.reviewBtn} onPress={() => setReviewTarget(b)}>
+                      <Text style={styles.reviewBtnText}>Review guest</Text>
+                    </TouchableOpacity>
+                  )}
+                  {b.status === 'pending' && (
+                    <View style={styles.decisionRow}>
+                      <TouchableOpacity
+                        style={[styles.decisionBtn, styles.approveBtn]}
+                        onPress={async () => {
+                          try {
+                            await approveBooking(b);
+                            requestPush('booking_decided', { booking_id: b.id }).catch(() => {});
+                            Alert.alert('Confirmed', 'The guest has been notified.');
+                            load();
+                          } catch (e: any) {
+                            Alert.alert('Could not confirm', e.message || 'Try again.');
+                          }
+                        }}
+                      >
+                        <Text style={styles.approveText}>Confirm</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.decisionBtn, styles.declineBtn]}
+                        onPress={() => {
+                          Alert.alert(
+                            'Decline request?',
+                            'The guest gets a full refund and the dates reopen.',
+                            [
+                              { text: 'Keep', style: 'cancel' },
+                              {
+                                text: 'Decline',
+                                style: 'destructive',
+                                onPress: async () => {
+                                  try {
+                                    await declineBooking(b);
+                                    requestPush('booking_decided', { booking_id: b.id }).catch(() => {});
+                                    load();
+                                  } catch (e: any) {
+                                    Alert.alert('Could not decline', e.message || 'Try again.');
+                                  }
+                                },
+                              },
+                            ]
+                          );
+                        }}
+                      >
+                        <Text style={styles.declineText}>Decline</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.chatBtn}
+                    onPress={async () => {
+                      try {
+                        const convo = await getOrCreateConversation(b);
+                        router.push({ pathname: '/(tabs)/messages', params: { conversationId: convo.id } });
+                      } catch (e: any) {
+                        Alert.alert('Chat unavailable', e.message || 'Try again.');
                       }
-                    >
-                      <Text style={styles.bookingActionText}>Digital Guest Reg</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.bookingActionBtn, { backgroundColor: Colors.primaryBlack }]}
-                      onPress={() => Alert.alert('Message Guest', `Opening direct message thread...`)}
-                    >
-                      <Text style={[styles.bookingActionText, { color: Colors.textWhite }]}>
-                        Message
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.chatBtnText}>Chat with guest</Text>
+                  </TouchableOpacity>
                 </View>
               ))
             )}
           </View>
         )}
 
-        {/* Tab 3: Insights & Analytics View */}
-        {activeSegment === 'Insights' && (
-          <View style={styles.insightsContainer}>
-            {/* 2% Fee Transparency Counter Card */}
-            <View style={styles.insightsCard}>
-              <View style={styles.insightHeader}>
-                <Sparkles size={16} color={Colors.textWhite} />
-                <Text style={styles.insightKicker}>FAIR HILL ECONOMICS</Text>
+        {activeSegment === 'Saved' && (
+          <View>
+            <Text style={styles.subSectionTitle}>Saved stays</Text>
+            {saved.length === 0 ? (
+              <EmptyState
+                title="Nothing saved"
+                description="Tap the heart on any stay to keep it here."
+                actionText="Explore stays"
+                onAction={() => router.push('/(tabs)')}
+              />
+            ) : (
+              <View style={styles.gridContainer}>
+                {saved.map((property) => (
+                  <PropertyGridCard
+                    key={property.id}
+                    property={property}
+                    saved
+                    onToggleSave={async () => {
+                      await toggleWishlist(property.id);
+                      load();
+                    }}
+                    onPress={() =>
+                      router.push({ pathname: '/property/[id]', params: { id: property.id } })
+                    }
+                  />
+                ))}
               </View>
+            )}
+          </View>
+        )}
 
-              <Text style={styles.insightMainStat}>
-                ₹{(stats?.grossEarnings || 84200).toLocaleString('en-IN')}
-              </Text>
-              <Text style={styles.insightStatSub}>Gross Earnings This Season</Text>
-
-              <View style={styles.savingsBanner}>
-                <CheckCircle2 size={16} color="#4ADE80" />
-                <Text style={styles.savingsBannerText}>
-                  You saved ₹{Math.round((stats?.grossEarnings || 84200) * 0.18).toLocaleString('en-IN')} in fees compared to Airbnb's 20%!
+        {activeSegment === 'Insights' && (
+          <View>
+            {!profile.is_identity_verified && properties.length > 0 && (
+              <View style={styles.kycBanner}>
+                <Text style={styles.kycBannerText}>
+                  Verify your identity to receive payouts. Scheduled payouts wait until you do.
                 </Text>
               </View>
-
+            )}
+            <SafetyQueue hostId={profile.id} />
+            <View style={styles.insightsCard}>
+              <Text style={styles.insightMainStat}>
+                ₹{(stats?.grossEarnings || 0).toLocaleString('en-IN')}
+              </Text>
+              <Text style={styles.insightStatSub}>Gross booking volume</Text>
               <View style={styles.telemetryGrid}>
                 <View style={styles.telemetryBox}>
-                  <Text style={styles.telemetryVal}>{stats?.occupancyPercent || 88}%</Text>
+                  <Text style={styles.telemetryVal}>{stats?.occupancyPercent ?? 0}%</Text>
                   <Text style={styles.telemetryLabel}>Occupancy</Text>
                 </View>
                 <View style={styles.telemetryBox}>
-                  <Text style={styles.telemetryVal}>{stats?.rating || 4.95}★</Text>
-                  <Text style={styles.telemetryLabel}>Avg Rating</Text>
+                  <Text style={styles.telemetryVal}>{stats?.bookingsCount ?? 0}</Text>
+                  <Text style={styles.telemetryLabel}>Bookings</Text>
                 </View>
                 <View style={styles.telemetryBox}>
-                  <Text style={styles.telemetryVal}>{stats?.viewsCount || 1840}</Text>
-                  <Text style={styles.telemetryLabel}>Views</Text>
+                  <Text style={styles.telemetryVal}>
+                    {stats?.nextPayoutAmount ? `₹${stats.nextPayoutAmount.toLocaleString('en-IN')}` : '—'}
+                  </Text>
+                  <Text style={styles.telemetryLabel}>Next payout</Text>
                 </View>
               </View>
+              <TouchableOpacity style={styles.payoutRow} onPress={() => setIsPayoutOpen(true)}>
+                <View>
+                  <Text style={styles.payoutLabel}>Payout destination</Text>
+                  <Text style={styles.payoutNextText}>
+                    {profile.payout_method === 'bank'
+                      ? profile.bank_account_number
+                        ? `•••• ${profile.bank_account_number.slice(-4)} · ${profile.bank_ifsc || ''}`
+                        : 'Bank not connected'
+                      : profile.upi_vpa || 'UPI not connected'}
+                  </Text>
+                </View>
+                <Text style={styles.payoutEdit}>Edit</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Escrow Payouts Card */}
-            <View style={styles.payoutLedgerCard}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Wallet size={18} color={Colors.textPrimary} />
-                <Text style={styles.payoutCardTitle}>Verified UPI Payouts</Text>
+            {payouts.length > 0 && (
+              <View style={styles.historySection}>
+                <Text style={styles.subSectionTitle}>Payout history</Text>
+                {payouts.map((pay) => (
+                  <View key={pay.id} style={styles.payoutCard}>
+                    <View style={styles.payoutCardRow}>
+                      <Text style={styles.payoutCardTitle} numberOfLines={1}>
+                        {pay.booking?.property?.title || 'Booking'}
+                      </Text>
+                      <Text style={styles.payoutCardAmount}>
+                        ₹{pay.net_payout.toLocaleString('en-IN')}
+                      </Text>
+                    </View>
+                    <View style={styles.payoutCardRow}>
+                      <Text style={styles.payoutCardSub}>
+                        {pay.booking ? `${pay.booking.check_in} → ${pay.booking.check_out}` : ''} · fee ₹
+                        {pay.platform_fee.toLocaleString('en-IN')}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.payoutStatus,
+                          pay.payout_status === 'completed' && styles.payoutStatusDone,
+                          pay.payout_status === 'failed' && styles.payoutStatusFailed,
+                        ]}
+                      >
+                        {pay.payout_status === 'scheduled' ? 'On the way' : pay.payout_status}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
               </View>
-              <Text style={styles.payoutUpiText}>Primary: {profile?.upi_vpa || 'abdur@okaxis'} (Verified ✅)</Text>
-              <Text style={styles.payoutNextText}>
-                Next Release: ₹{(stats?.nextPayoutAmount || 12800).toLocaleString('en-IN')} scheduled for {stats?.nextPayoutDate || 'Sep 8'} (24h post check-in)
-              </Text>
-            </View>
-
-            {/* iCal Calendar Health Card */}
-            <TouchableOpacity
-              style={[styles.payoutLedgerCard, { marginTop: 12 }]}
-              onPress={() => setIsCalendarSyncOpen(true)}
-              activeOpacity={0.88}
-            >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Calendar size={18} color={Colors.textPrimary} />
-                  <Text style={styles.payoutCardTitle}>iCal Calendar Sync Health</Text>
-                </View>
-                <View style={styles.confirmedBadge}>
-                  <Text style={styles.confirmedText}>Synced</Text>
-                </View>
-              </View>
-              <Text style={styles.payoutUpiText}>Airbnb Feed: 6 dates blocked • Hilt Export: Live</Text>
-              <Text style={styles.payoutNextText}>Tap to manage external iCal feeds →</Text>
-            </TouchableOpacity>
+            )}
           </View>
         )}
+
+        <View style={styles.legalSection}>
+          <Text style={styles.subSectionTitle}>Legal & Account</Text>
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setLegalDoc('privacy')}
+            activeOpacity={0.7}
+          >
+            <ShieldCheck size={18} color={Colors.textPrimary} />
+            <Text style={styles.menuRowText}>Privacy Policy (DPDP Act 2023)</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setLegalDoc('terms')}
+            activeOpacity={0.7}
+          >
+            <FileText size={18} color={Colors.textPrimary} />
+            <Text style={styles.menuRowText}>Terms of Service</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setLegalDoc('hillcover')}
+            activeOpacity={0.7}
+          >
+            <Umbrella size={18} color={Colors.textPrimary} />
+            <Text style={styles.menuRowText}>HillCover ₹50,000 Guarantee</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setLegalDoc('cancellation')}
+            activeOpacity={0.7}
+          >
+            <FileText size={18} color={Colors.textPrimary} />
+            <Text style={styles.menuRowText}>Cancellation & Refund Policy</Text>
+          </TouchableOpacity>
+
+          <View style={styles.dangerDivider} />
+
+          <TouchableOpacity
+            style={styles.deleteAccountBtn}
+            onPress={handleDeleteAccount}
+            disabled={isDeleting}
+            activeOpacity={0.8}
+          >
+            <Trash2 size={16} color="#DC2626" />
+            <Text style={styles.deleteAccountText}>
+              {isDeleting ? 'Deleting account...' : 'Delete Account'}
+            </Text>
+          </TouchableOpacity>
+          <Text style={styles.deleteSubtext}>
+            Permanently erases profile, saved items, and personal data (Apple Guideline 5.1.1(v) & DPDP Act 2023).
+          </Text>
+        </View>
       </ScrollView>
 
-      {/* 8-Step Add Property Modal */}
+      <ReviewGuestModal
+        visible={!!reviewTarget}
+        booking={reviewTarget}
+        onClose={() => setReviewTarget(null)}
+        onDone={() => load()}
+      />
+      <PayoutSettingsModal
+        visible={isPayoutOpen}
+        profile={profile}
+        onClose={() => setIsPayoutOpen(false)}
+        onSaved={() => load()}
+      />
       <AddPropertyModal
         visible={isAddPropertyOpen}
         onClose={() => setIsAddPropertyOpen(false)}
-        onSuccess={() => {
-          getProperties().then((data) => setProperties(data));
-        }}
+        onSuccess={() => load()}
       />
-
-      {/* 2-Way Calendar Sync Modal */}
       <CalendarSyncModal
         visible={isCalendarSyncOpen}
-        propertyTitle={properties[0]?.title || 'Cedar Wood Homestead'}
+        propertyId={properties[0]?.id || ''}
+        propertyTitle={properties[0]?.title || ''}
         onClose={() => setIsCalendarSyncOpen(false)}
       />
-
-      {/* Unified Identity Auth Modal */}
-      <AuthModal
-        visible={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onSuccess={(user) => {
-          Alert.alert('Account Switched', `Logged in as ${user.full_name || user.email || 'Host'}`);
-        }}
-      />
-
-      {/* Live Sandbox Aadhaar & DigiLocker KYC Modal */}
-      <AadhaarKycModal
-        visible={isKycModalOpen}
-        onClose={() => setIsKycModalOpen(false)}
-        onVerified={(result) => {
-          setVerifiedKyc({ name: result.name, maskedAadhaar: result.maskedAadhaar });
-          Alert.alert(
-            'UIDAI KYC Verified',
-            `Successfully verified Aadhaar for ${result.name || 'Host'}.\nDigiLocker certificate recorded.`
-          );
-        }}
-        userType="host"
-      />
+      {availabilityFor && (
+        <AvailabilityManager
+          visible={!!availabilityFor}
+          propertyId={availabilityFor.id}
+          propertyTitle={availabilityFor.title}
+          hostId={profile.id}
+          onClose={() => setAvailabilityFor(null)}
+        />
+      )}
+      <AuthModal visible={isAuthOpen} onClose={() => setIsAuthOpen(false)} onSuccess={() => load()} />
+      {legalDoc && (
+        <LegalModal visible onClose={() => setLegalDoc(null)} initialDoc={legalDoc} />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
+  safeArea: { flex: 1, backgroundColor: '#FFFFFF' },
+  center: { flex: 1, justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -446,416 +608,161 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'android' ? 14 : 8,
     paddingBottom: 12,
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  settingsButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  headerTitle: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
+  signOut: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 120 },
+  profileRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 18 },
+  avatarFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.primaryBlack,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 120,
-  },
-  profileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 20,
-  },
-  avatar: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-  },
-  profileInfo: {
-    flex: 1,
-    marginLeft: 14,
-  },
-  profileName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  profileEmail: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  editProfileButton: {
-    backgroundColor: Colors.pillInactive,
-    borderRadius: 9999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  editProfileText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 22,
-  },
+  avatarText: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  profileInfo: { flex: 1, marginLeft: 12 },
+  localeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  localeChip: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 9999, backgroundColor: Colors.pillInactive },
+  localeChipActive: { backgroundColor: Colors.primaryBlack },
+  localeText: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  localeTextActive: { color: Colors.textWhite },
+  profileName: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary },
+  profileEmail: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
   statBox: {
     flex: 1,
     backgroundColor: Colors.backgroundApp,
-    borderRadius: 20,
-    padding: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
-  },
-  statIconBadge: {
-    width: 32,
-    height: 32,
     borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    padding: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  segmentedContainer: {
-    flexDirection: 'row',
-    backgroundColor: Colors.pillInactive,
-    borderRadius: 9999,
-    padding: 4,
-    marginBottom: 20,
-  },
-  segmentPill: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 9999,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  segmentPillActive: {
-    backgroundColor: Colors.primaryBlack,
-  },
-  segmentText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  segmentTextActive: {
-    color: Colors.textWhite,
-  },
-  calendarSyncCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F0FDF4',
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-  },
-  calendarSyncLeft: {
-    flex: 1,
-    marginRight: 10,
-  },
-  syncTagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 4,
-  },
-  syncTagText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#15803D',
-    letterSpacing: 0.5,
-  },
-  calendarSyncTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  calendarSyncSub: {
-    fontSize: 11,
-    color: '#4B5563',
-    marginTop: 2,
-    lineHeight: 15,
-  },
-  syncBtnSmall: {
-    backgroundColor: Colors.primaryBlack,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 9999,
-  },
-  syncBtnSmallText: {
-    color: Colors.textWhite,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  actionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  subSectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  addPropertySmallBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: Colors.primaryBlack,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 9999,
-  },
-  addPropertySmallText: {
-    color: Colors.textWhite,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  gridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  bookingsContainer: {
-    marginTop: 6,
-  },
-  bookingCard: {
-    backgroundColor: Colors.backgroundApp,
-    borderRadius: 22,
-    padding: 16,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  bookingHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  bookingGuestName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  confirmedBadge: {
-    backgroundColor: '#DCFCE7',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  confirmedText: {
-    color: '#15803D',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  bookingStay: {
-    fontSize: 14,
-    color: Colors.textPrimary,
-    fontWeight: '500',
-    marginTop: 4,
-  },
-  bookingDates: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  payoutStrip: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    padding: 10,
-    borderRadius: 12,
-    marginTop: 12,
     borderWidth: 1,
     borderColor: '#EEEEEE',
   },
-  payoutLabel: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-  },
-  payoutVal: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#15803D',
-  },
-  bookingActionsRow: {
+  statValue: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  statLabel: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  segmentedContainer: { flexDirection: 'row', backgroundColor: Colors.pillInactive, borderRadius: 9999, padding: 4, marginBottom: 18 },
+  segmentPill: { flex: 1, paddingVertical: 10, borderRadius: 9999, alignItems: 'center' },
+  segmentPillActive: { backgroundColor: Colors.primaryBlack },
+  segmentText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  segmentTextActive: { color: Colors.textWhite },
+  actionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  subSectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.primaryBlack, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9999 },
+  addBtnText: { color: Colors.textWhite, fontSize: 12, fontWeight: '700' },
+  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  syncRow: { paddingVertical: 12, alignItems: 'center' },
+  syncText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary, textDecorationLine: 'underline' },
+  bookingCard: { backgroundColor: Colors.backgroundApp, borderRadius: 16, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+  bookingGuest: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  bookingDates: { fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
+  payoutVal: { fontSize: 13, fontWeight: '700', color: '#15803D', marginTop: 8 },
+  feeLine: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  hostSayBox: { marginBottom: 18 },
+  hostSayCard: { backgroundColor: Colors.backgroundApp, borderRadius: 14, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#E5E7EB' },
+  hostSayMeta: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
+  hostSayText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18, marginTop: 4 },
+  reviewBtn: { backgroundColor: Colors.pillInactive, borderRadius: 9999, paddingVertical: 10, alignItems: 'center', marginTop: 10 },
+  reviewBtnText: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  decisionRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  decisionBtn: { flex: 1, borderRadius: 9999, paddingVertical: 10, alignItems: 'center' },
+  approveBtn: { backgroundColor: '#15803D' },
+  approveText: { color: Colors.textWhite, fontSize: 13, fontWeight: '700' },
+  declineBtn: { backgroundColor: Colors.pillInactive },
+  declineText: { color: '#B91C1C', fontSize: 13, fontWeight: '700' },
+  payoutRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
-  },
-  bookingActionBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 9999,
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  bookingActionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  insightsContainer: {
-    marginTop: 6,
-  },
-  insightsCard: {
-    backgroundColor: '#0F1419',
-    borderRadius: 24,
-    padding: 22,
-  },
-  insightHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  insightKicker: {
-    color: Colors.textWhite,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  insightMainStat: {
-    color: Colors.textWhite,
-    fontSize: 32,
-    fontWeight: '800',
-  },
-  insightStatSub: {
-    color: '#9CA3AF',
-    fontSize: 13,
-    marginTop: 2,
-  },
-  savingsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
-    borderRadius: 12,
-    padding: 10,
-    marginTop: 16,
-  },
-  savingsBannerText: {
-    color: '#4ADE80',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  telemetryGrid: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 16,
-  },
-  telemetryBox: {
-    flex: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: 14,
     padding: 12,
-    alignItems: 'center',
-  },
-  telemetryVal: {
-    color: Colors.textWhite,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  telemetryLabel: {
-    color: '#9CA3AF',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  payoutLedgerCard: {
-    backgroundColor: Colors.backgroundApp,
-    borderRadius: 20,
-    padding: 18,
     marginTop: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
   },
-  payoutCardTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  payoutUpiText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginTop: 6,
-  },
-  payoutNextText: {
-    fontSize: 12,
-    color: '#15803D',
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  addPropertyInlineBtn: {
-    flexDirection: 'row',
+  payoutLabel: { color: '#9CA3AF', fontSize: 11, fontWeight: '600' },
+  payoutEdit: { color: Colors.textWhite, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
+  historySection: { marginTop: 18 },
+  payoutCard: { backgroundColor: Colors.backgroundApp, borderRadius: 14, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#E5E7EB' },
+  payoutCardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  payoutCardTitle: { flex: 1, fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  payoutCardAmount: { fontSize: 14, fontWeight: '800', color: '#15803D' },
+  payoutCardSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 4 },
+  payoutStatus: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, textTransform: 'capitalize', marginTop: 4 },
+  payoutStatusDone: { color: '#15803D' },
+  payoutStatusFailed: { color: '#B91C1C' },
+  kycBanner: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 12, padding: 12, marginBottom: 12 },
+  kycBannerText: { fontSize: 12, color: '#92400E', lineHeight: 17 },
+  chatBtn: {
     backgroundColor: Colors.primaryBlack,
     borderRadius: 9999,
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  chatBtnText: { color: Colors.textWhite, fontSize: 13, fontWeight: '700' },
+  availRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  availTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: Colors.textPrimary, marginRight: 10 },
+  availLink: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, textDecorationLine: 'underline' },
+  insightsCard: { backgroundColor: '#0F1419', borderRadius: 22, padding: 20 },
+  insightMainStat: { color: Colors.textWhite, fontSize: 30, fontWeight: '800' },
+  insightStatSub: { color: '#9CA3AF', fontSize: 13, marginTop: 2 },
+  telemetryGrid: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  telemetryBox: { flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: 12, padding: 10, alignItems: 'center' },
+  telemetryVal: { color: Colors.textWhite, fontSize: 14, fontWeight: '800' },
+  telemetryLabel: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
+  payoutNextText: { color: '#4ADE80', fontSize: 12, fontWeight: '600', marginTop: 12 },
+  legalSection: {
+    marginTop: 28,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#EEEEEE',
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  menuRowText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  dangerDivider: {
+    height: 1,
+    backgroundColor: '#FEE2E2',
+    marginVertical: 18,
+  },
+  deleteAccountBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 18,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 14,
+    paddingVertical: 13,
   },
-  addPropertyInlineText: {
-    color: Colors.textWhite,
+  deleteAccountText: {
+    color: '#DC2626',
     fontSize: 14,
     fontWeight: '700',
   },
-  emptyBookingsCard: {
-    backgroundColor: Colors.backgroundApp,
-    borderRadius: 18,
-    padding: 24,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginTop: 10,
-  },
-  emptyBookingsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  emptyBookingsSub: {
-    fontSize: 13,
+  deleteSubtext: {
+    fontSize: 11,
     color: Colors.textSecondary,
     textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 18,
+    marginTop: 8,
+    lineHeight: 16,
   },
 });

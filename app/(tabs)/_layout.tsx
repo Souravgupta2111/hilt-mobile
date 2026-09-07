@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import { FloatingBottomDock } from '../../components/FloatingBottomDock';
+import { FloatingActionButton } from '../../components/FloatingActionButton';
 import { ActionLauncherModal } from '../../components/ActionLauncherModal';
 import { AddPropertyModal } from '../../components/AddPropertyModal';
 import { AiConciergeModal } from '../../components/AiConciergeModal';
+import { hydrateWayzyyStore } from '../../lib/wayzyy';
+import { registerPushToken } from '../../lib/push';
 
 export default function TabLayout() {
   const router = useRouter();
@@ -13,7 +16,13 @@ export default function TabLayout() {
   const [isAddPropertyOpen, setIsAddPropertyOpen] = useState(false);
   const [isAiConciergeOpen, setIsAiConciergeOpen] = useState(false);
 
+  useEffect(() => {
+    hydrateWayzyyStore();
+    registerPushToken();
+  }, []);
+
   const getActiveTab = () => {
+    if (pathname.includes('messages')) return 'messages';
     if (pathname.includes('itineraries')) return 'itineraries';
     if (pathname.includes('trips')) return 'trips';
     if (pathname.includes('profile')) return 'profile';
@@ -25,10 +34,10 @@ export default function TabLayout() {
       router.push('/(tabs)');
     } else if (tabName === 'itineraries') {
       router.push('/(tabs)/itineraries');
-    } else if (tabName === 'action') {
-      setIsActionLauncherOpen(true);
     } else if (tabName === 'trips') {
       router.push('/(tabs)/trips');
+    } else if (tabName === 'messages') {
+      router.push('/(tabs)/messages');
     } else if (tabName === 'profile') {
       router.push('/(tabs)/profile');
     }
@@ -45,6 +54,7 @@ export default function TabLayout() {
         <Tabs.Screen name="index" />
         <Tabs.Screen name="itineraries" />
         <Tabs.Screen name="trips" />
+        <Tabs.Screen name="messages" />
         <Tabs.Screen name="profile" />
       </Tabs>
 
@@ -53,6 +63,9 @@ export default function TabLayout() {
         activeTab={getActiveTab()}
         onSelectTab={handleSelectTab}
       />
+
+      {/* Floating + action, bottom-right above the dock */}
+      <FloatingActionButton onPress={() => setIsActionLauncherOpen(true)} />
 
       {/* Center Action Launcher Sheet */}
       <ActionLauncherModal

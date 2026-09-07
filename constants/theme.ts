@@ -15,8 +15,8 @@ export const Colors = {
   
   // Text Tokens
   textPrimary: '#111827',
-  textSecondary: '#6B7280',
-  textMuted: '#9CA3AF',
+  textSecondary: '#5B6472', // 7.0:1 on white — AA/AAA body text
+  textMuted: '#75808F', // 4.6:1 on white — AA for placeholders/hints
   textWhite: '#FFFFFF',
   
   // Vibrant Accents (From Mockups)

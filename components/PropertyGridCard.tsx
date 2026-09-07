@@ -7,10 +7,13 @@ import { Colors } from '../constants/theme';
 interface PropertyGridCardProps {
   property: Property;
   onPress: () => void;
+  saved?: boolean;
+  onToggleSave?: () => void;
 }
 
-export function PropertyGridCard({ property, onPress }: PropertyGridCardProps) {
-  const [isFavorite, setIsFavorite] = useState(false);
+export function PropertyGridCard({ property, onPress, saved, onToggleSave }: PropertyGridCardProps) {
+  const [localFav, setLocalFav] = useState(false);
+  const isFavorite = saved ?? localFav;
 
   const formatPrice = (price: number) => {
     return `₹${price.toLocaleString('en-IN')}`;
@@ -24,15 +27,19 @@ export function PropertyGridCard({ property, onPress }: PropertyGridCardProps) {
     >
       {/* Image with Heart badge */}
       <View style={styles.imageContainer}>
-        <Image
-          source={{ uri: property.images[0] }}
-          style={styles.image}
-          resizeMode="cover"
-        />
+        {property.images?.[0] ? (
+          <Image
+            source={{ uri: property.images[0] }}
+            style={styles.image}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.image, { backgroundColor: '#E5E7EB' }]} />
+        )}
 
         <TouchableOpacity
           style={styles.heartBadge}
-          onPress={() => setIsFavorite(!isFavorite)}
+          onPress={() => (onToggleSave ? onToggleSave() : setLocalFav(!localFav))}
           activeOpacity={0.8}
         >
           <Heart

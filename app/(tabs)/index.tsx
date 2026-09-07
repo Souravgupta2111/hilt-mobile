@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,208 +6,201 @@ import {
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
-  Image,
+  TextInput,
   RefreshControl,
   Platform,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, SlidersHorizontal, Bell, MapPin, X, Sparkles } from 'lucide-react-native';
+import { Search, SlidersHorizontal, Map as MapIcon } from 'lucide-react-native';
 import { CategoryPillBar } from '../../components/CategoryPillBar';
 import { PropertyCard } from '../../components/PropertyCard';
 import { PropertyCardSkeleton } from '../../components/SkeletonLoader';
 import { EmptyState } from '../../components/EmptyState';
-import { FilterModal, FilterState } from '../../components/FilterModal';
-import { getProperties, getCurrentUserProfile } from '../../lib/supabase';
+import { FilterModal } from '../../components/FilterModal';
+import { ExploreMap } from '../../components/ExploreMap';
+import { AuthModal } from '../../components/AuthModal';
+import {
+  searchProperties,
+  getCurrentUserProfile,
+  getWishlistIds,
+  toggleWishlist,
+  type SearchParams,
+} from '../../lib/supabase';
 import { Property, Profile } from '../../types/database';
 import { Colors } from '../../constants/theme';
+import { t } from '../../lib/i18n';
+import { useLocale } from '../../lib/locale';
+import { LOCALES } from '../../lib/i18n';
 
 export default function ExploreScreen() {
   const router = useRouter();
-  const [selectedCategory, setSelectedCategory] = useState('Home');
+  useLocale(); // re-render on language change
+  const [params, setParams] = useState<SearchParams>({
+    category: 'All',
+    guests: 1,
+    minBeds: 1,
+    sort: 'recommended',
+  });
   const [properties, setProperties] = useState<Property[]>([]);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<FilterState | null>(null);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isMapOpen, setIsMapOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [draftQuery, setDraftQuery] = useState('');
 
   useEffect(() => {
     getCurrentUserProfile().then((u) => setCurrentUser(u));
+    getWishlistIds().then(setSavedIds);
   }, []);
 
-  const loadProperties = async (cat: string, filters?: FilterState | null) => {
+  const runSearch = useCallback(async (p: SearchParams) => {
     setIsLoading(true);
-    let data = await getProperties(cat);
-    const active = filters !== undefined ? filters : activeFilters;
-
-    if (active) {
-      if (active.bedCount > 1) {
-        data = data.filter((p) => p.bedrooms >= active.bedCount);
-      }
-      if (active.powerBackup) {
-        data = data.filter((p) => p.power_backup && p.power_backup !== 'None');
-      }
-      if (active.highSpeedWifi) {
-        data = data.filter((p) => p.wifi_speed_mbps >= 50);
-      }
+    try {
+      setProperties(await searchProperties(p));
+    } finally {
+      setIsLoading(false);
     }
-
-    setProperties(data);
-    setIsLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    loadProperties(selectedCategory, activeFilters);
-  }, [selectedCategory, activeFilters]);
+    runSearch(params);
+  }, []);
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await loadProperties(selectedCategory, activeFilters);
+    await runSearch(params);
+    setCurrentUser(await getCurrentUserProfile());
+    setSavedIds(await getWishlistIds());
     setIsRefreshing(false);
   };
 
-  const handleSelectProperty = (prop: Property) => {
-    router.push({
-      pathname: '/property/[id]',
-      params: { id: prop.id },
-    });
+  const toggleSave = async (id: string) => {
+    if (!currentUser) {
+      setIsAuthOpen(true);
+      return;
+    }
+    try {
+      const saved = await toggleWishlist(id);
+      setSavedIds((prev) => {
+        const next = new Set(prev);
+        if (saved) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+    } catch (e: any) {
+      Alert.alert('Could not save', e.message || 'Try again.');
+    }
   };
+
+  const submitQuery = () => {
+    const next = { ...params, query: draftQuery.trim() || undefined };
+    setParams(next);
+    runSearch(next);
+  };
+
+  const dateLabel =
+    params.checkIn && params.checkOut
+      ? `${new Date(params.checkIn).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(
+          params.checkOut
+        ).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+      : 'Dates';
+
+  const initials = currentUser?.full_name
+    ? currentUser.full_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+    : 'H';
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* Top Header Bar */}
       <View style={styles.headerBar}>
-        <View style={styles.userProfileRow}>
-          <Image
-            source={{
-              uri:
-                currentUser?.avatar_url ||
-                'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-            }}
-            style={styles.avatar}
-          />
-          <View style={styles.userTextCol}>
+        <View style={styles.userRow}>
+          <View style={styles.avatarFallback}>
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
+          <View>
             <Text style={styles.greetingText}>
-              Hi {currentUser?.full_name ? currentUser.full_name.split(' ')[0] : 'Explorer'}
+              {currentUser ? `Hi, ${currentUser.full_name.split(' ')[0]}` : 'Explore stays'}
             </Text>
-            <View style={styles.locationRow}>
-              <MapPin size={11} color={Colors.textSecondary} />
-              <Text style={styles.locationText}>
-                {currentUser?.location || 'Himachal Pradesh'}
-              </Text>
-            </View>
+            <Text style={styles.locationText}>Himachal & Uttarakhand</Text>
           </View>
         </View>
-
-        {/* Notification Bell Button */}
-        <TouchableOpacity style={styles.notificationButton} activeOpacity={0.8}>
-          <Bell size={18} color={Colors.textPrimary} />
-          <View style={styles.notificationDot} />
-        </TouchableOpacity>
+        {!currentUser && (
+          <TouchableOpacity style={styles.signInBtn} onPress={() => setIsAuthOpen(true)}>
+            <Text style={styles.signInText}>Sign in</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Search & Filter Capsule Bar */}
       <View style={styles.searchSection}>
-        <TouchableOpacity
-          style={styles.searchCapsule}
-          onPress={() => setIsFilterModalOpen(true)}
-          activeOpacity={0.9}
-        >
+        <View style={styles.searchCapsule}>
           <Search size={18} color="#71717A" />
-          <View style={styles.searchTextCol}>
-            <Text style={styles.searchTitle}>Find Your New</Text>
-            <Text style={styles.searchPlaceholder}>Properties & More</Text>
-          </View>
+          <TextInput
+            style={styles.searchInput}
+            value={draftQuery}
+            onChangeText={setDraftQuery}
+            onSubmitEditing={submitQuery}
+            placeholder="Search town, valley, or stay"
+            placeholderTextColor={Colors.textMuted}
+            returnKeyType="search"
+            accessibilityLabel="Search stays by town, valley, or name"
+          />
           <TouchableOpacity
-            style={styles.filterIconButton}
-            onPress={() => setIsFilterModalOpen(true)}
+            onPress={() => setIsFilterOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Open search and filters"
           >
-            <SlidersHorizontal size={18} color={activeFilters ? Colors.primaryBlack : Colors.textPrimary} />
+            <SlidersHorizontal size={18} color={Colors.textPrimary} />
           </TouchableOpacity>
-        </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setIsMapOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Open map"
+          >
+            <MapIcon size={18} color={Colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.pillRow}>
+          <TouchableOpacity style={styles.quickPill} onPress={() => setIsFilterOpen(true)}>
+            <Text style={[styles.quickText, params.checkIn && styles.quickTextActive]}>{dateLabel}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickPill} onPress={() => setIsFilterOpen(true)}>
+            <Text style={[styles.quickText, (params.guests || 1) > 1 && styles.quickTextActive]}>
+              {(params.guests || 1) > 1 ? `${params.guests} guests` : 'Guests'}
+            </Text>
+          </TouchableOpacity>
+          {(params.minPrice || params.maxPrice) && (
+            <View style={styles.quickPill}>
+              <Text style={[styles.quickText, styles.quickTextActive]}>
+                ₹{params.minPrice || '0'}–{params.maxPrice ? `₹${params.maxPrice}` : '∞'}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
-      {/* Active Mountain Filter Pills */}
-      {activeFilters && (activeFilters.selectedSeason || activeFilters.selectedLandmark || activeFilters.powerBackup || activeFilters.highSpeedWifi) && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.activeFiltersRow}
-        >
-          {activeFilters.selectedSeason && (
-            <View style={styles.activeFilterChip}>
-              <Sparkles size={12} color={Colors.primaryBlack} />
-              <Text style={styles.activeFilterText}>
-                Season: {activeFilters.selectedSeason.charAt(0).toUpperCase() + activeFilters.selectedSeason.slice(1)}
-              </Text>
-              <TouchableOpacity onPress={() => setActiveFilters({ ...activeFilters, selectedSeason: null })}>
-                <X size={12} color={Colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {activeFilters.selectedLandmark && (
-            <View style={styles.activeFilterChip}>
-              <MapPin size={12} color="#2563EB" />
-              <Text style={styles.activeFilterText}>
-                Near {activeFilters.selectedLandmark} (≤ {activeFilters.radiusMinutes}m)
-              </Text>
-              <TouchableOpacity onPress={() => setActiveFilters({ ...activeFilters, selectedLandmark: null })}>
-                <X size={12} color={Colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {activeFilters.powerBackup && (
-            <View style={styles.activeFilterChip}>
-              <Text style={styles.activeFilterText}>⚡ 100% Backup</Text>
-              <TouchableOpacity onPress={() => setActiveFilters({ ...activeFilters, powerBackup: false })}>
-                <X size={12} color={Colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {activeFilters.highSpeedWifi && (
-            <View style={styles.activeFilterChip}>
-              <Text style={styles.activeFilterText}>📶 &gt;50Mbps Fiber</Text>
-              <TouchableOpacity onPress={() => setActiveFilters({ ...activeFilters, highSpeedWifi: false })}>
-                <X size={12} color={Colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={styles.clearAllFiltersBtn}
-            onPress={() => setActiveFilters(null)}
-          >
-            <Text style={styles.clearAllFiltersText}>Clear all</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      )}
-
-      {/* Horizontal Category Carousel */}
       <CategoryPillBar
-        selectedCategory={selectedCategory}
-        onSelectCategory={(cat) => setSelectedCategory(cat)}
+        categories={['All', 'Home', 'Hotel', 'Apartment', 'Office']}
+        selectedCategory={params.category || 'All'}
+        onSelectCategory={(category) => {
+          const next = { ...params, category };
+          setParams(next);
+          runSearch(next);
+        }}
       />
 
-      {/* Main Content Area: Clean Vertical Card Feed */}
       <ScrollView
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={Colors.primaryBlack} />
-        }
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
       >
-        {/* Section Header */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Top Properties</Text>
-          <TouchableOpacity>
-            <Text style={styles.seeAllText}>See all</Text>
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>{t('explore_section_title')}</Text>
+          <Text style={styles.countText}>{!isLoading ? `${properties.length}` : ''}</Text>
         </View>
 
-        {/* Skeletal Loading State */}
         {isLoading && (
           <View>
             <PropertyCardSkeleton />
@@ -215,37 +208,65 @@ export default function ExploreScreen() {
           </View>
         )}
 
-        {/* Empty State */}
         {!isLoading && properties.length === 0 && (
           <EmptyState
-            title="No Stays Found"
-            description={`We couldn't find any stays in "${selectedCategory}". Try exploring other mountain categories.`}
-            actionText="Show All Stays"
-            onAction={() => setSelectedCategory('Home')}
+            title={t('common_no_results')}
+            description={t('common_no_results_desc')}
+            actionText={t('common_clear_search')}
+            onAction={() => {
+              const cleared: SearchParams = { category: 'All', guests: 1, minBeds: 1, sort: 'recommended' };
+              setParams(cleared);
+              setDraftQuery('');
+              runSearch(cleared);
+            }}
           />
         )}
 
-        {/* Cards View (Clean Vertical Feed) */}
-        {!isLoading && (
-          <View>
-            {properties.map((property) => (
-              <PropertyCard
-                key={property.id}
-                property={property}
-                onPress={() => handleSelectProperty(property)}
-              />
-            ))}
-          </View>
-        )}
+        {!isLoading &&
+          properties.map((property) => (
+            <PropertyCard
+              key={property.id}
+              property={property}
+              saved={savedIds.has(property.id)}
+              onToggleSave={() => toggleSave(property.id)}
+              onPress={() =>
+                router.push({
+                  pathname: '/property/[id]',
+                  params: {
+                    id: property.id,
+                    checkIn: params.checkIn || '',
+                    checkOut: params.checkOut || '',
+                    guests: String(params.guests || 1),
+                  },
+                })
+              }
+            />
+          ))}
       </ScrollView>
 
-      {/* Filter Modal Sheet */}
       <FilterModal
-        visible={isFilterModalOpen}
-        onClose={() => setIsFilterModalOpen(false)}
-        onApply={(filters) => {
-          setActiveFilters(filters);
-          loadProperties(selectedCategory, filters);
+        visible={isFilterOpen}
+        initial={params}
+        onClose={() => setIsFilterOpen(false)}
+        onApply={(f) => {
+          const next = { ...f, category: params.category };
+          setParams(next);
+          setDraftQuery(f.query || '');
+          runSearch(next);
+        }}
+      />
+      <AuthModal
+        visible={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onSuccess={(u) => setCurrentUser(u)}
+      />
+      <ExploreMap
+        visible={isMapOpen}
+        properties={properties}
+        onClose={() => setIsMapOpen(false)}
+        onSelectProperty={(p) => {
+          setIsMapOpen(false);
+          router.push({ pathname: '/property/[id]', params: { id: p.id } });
         }}
       />
     </SafeAreaView>
@@ -253,10 +274,7 @@ export default function ExploreScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
+  safeArea: { flex: 1, backgroundColor: '#FFFFFF' },
   headerBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -265,142 +283,39 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'android' ? 14 : 8,
     paddingBottom: 10,
   },
-  userProfileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-  },
-  userTextCol: {
-    justifyContent: 'center',
-  },
-  greetingText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    marginTop: 1,
-  },
-  locationText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-  },
-  notificationButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: Colors.pillInactive,
+  userRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatarFallback: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.primaryBlack,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
   },
-  notificationDot: {
-    position: 'absolute',
-    top: 12,
-    right: 13,
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: Colors.heartRed,
-  },
-  searchSection: {
-    paddingHorizontal: 20,
-    marginTop: 6,
-  },
+  avatarText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  greetingText: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
+  locationText: { fontSize: 12, color: Colors.textSecondary },
+  signInBtn: { backgroundColor: Colors.primaryBlack, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 9999 },
+  signInText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  searchSection: { paddingHorizontal: 20, marginTop: 6 },
   searchCapsule: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
     backgroundColor: Colors.backgroundApp,
-    borderRadius: 20,
+    borderRadius: 16,
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  searchTextCol: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  searchTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  searchPlaceholder: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    marginTop: 1,
-  },
-  filterIconButton: {
-    padding: 6,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  seeAllText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  scrollContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 110,
-  },
-  gridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  activeFiltersRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 20,
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  activeFilterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 9999,
-    paddingHorizontal: 12,
     paddingVertical: 6,
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
-  activeFilterText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  clearAllFiltersBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  clearAllFiltersText: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
+  searchInput: { flex: 1, fontSize: 15, color: Colors.textPrimary, paddingVertical: 8 },
+  pillRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  quickPill: { backgroundColor: Colors.pillInactive, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9999 },
+  quickText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  quickTextActive: { color: Colors.textPrimary, fontWeight: '700' },
+  sectionHeader: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 12 },
+  sectionTitle: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary },
+  countText: { fontSize: 13, color: Colors.textSecondary },
+  scrollContainer: { paddingHorizontal: 20, paddingBottom: 130 },
 });

@@ -1,135 +1,89 @@
-import { Alert } from 'react-native';
-
 export interface RazorpayOrderPayload {
   amount: number; // in INR
-  currency?: string; // 'INR'
+  currency?: string;
   receipt: string;
   propertyId: string;
-  guestName: string;
-  guestPhone: string;
-  guestEmail: string;
-  notes?: Record<string, string>;
+  travelerId: string;
+  roomId?: string;
+  bookingType: 'entire_villa' | 'single_room';
+  checkIn: string;
+  checkOut: string;
+  guestsCount: number;
+  totalNights: number;
+  nightlyRate: number;
+  subtotal: number;
+  cleaningFee?: number;
+  platformFee: number;
+  gstAmount?: number;
+  /** 'confirmed' for instant-book, 'pending' for request-to-book. */
+  initialStatus?: 'pending' | 'confirmed';
+  guestEmail?: string;
 }
 
 export interface PaymentSuccessResponse {
-  razorpay_payment_id: string;
+  razorpay_payment_id: string | null;
   razorpay_order_id: string;
-  razorpay_signature: string;
-  escrow_status: 'held_in_escrow';
-  escrow_release_time: string;
+  razorpay_signature: string | null;
+  escrow_status: 'held_in_escrow' | 'order_created';
+  escrow_release_time: string | null;
 }
 
-export interface EscrowReleaseEvent {
-  orderId: string;
-  hostUpiId: string;
-  netPayout: number;
-  platformFee: number;
-  releaseStatus: 'pending' | 'released' | 'landslide_refunded';
-}
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+export const RAZORPAY_KEY_ID = process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || '';
 
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://eccqfucljzppqomaiwgp.supabase.co';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjY3FmdWNsanpwcHFvbWFpd2dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1NDI1OTgsImV4cCI6MjEwNDExODU5OH0.FT-DT5zos5wuVjzOgjPG15YvLxiZrcUkGNJ_D8fZ6fM';
-
-/**
- * Creates a Razorpay Smart Escrow order for a mountain stay.
- * The order retains 98% in escrow vault for host payout post-check-in,
- * and 2% as Hilt platform commission.
- */
-export async function createRazorpayOrder(
-  payload: RazorpayOrderPayload
-): Promise<{ id: string; amount: number; currency: string }> {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/razorpay-create-order`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({
-        amount: payload.amount,
-        currency: payload.currency || 'INR',
-        property_id: payload.propertyId,
-        guest_id: payload.guestEmail,
-        nights: payload.notes?.nights ? parseInt(payload.notes.nights, 10) : 3,
-      }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.order?.id) {
-        return {
-          id: data.order.id,
-          amount: data.order.amount,
-          currency: data.order.currency || 'INR',
-        };
-      }
-    }
-
-    // Direct fallback order ID
-    const orderId = `order_rzp_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-    return {
-      id: orderId,
-      amount: Math.round(payload.amount * 100),
-      currency: payload.currency || 'INR',
-    };
-  } catch (error: any) {
-    console.error('Error creating Razorpay order:', error);
-    const orderId = `order_rzp_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-    return {
-      id: orderId,
-      amount: Math.round(payload.amount * 100),
-      currency: payload.currency || 'INR',
-    };
+function requireSupabaseConfig() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error('Supabase is not configured. Cannot create payment order.');
   }
 }
 
 /**
- * Initiates Razorpay Checkout via React Native standard flow or native UPI intent.
+ * Creates a Razorpay order through the live Edge Function, carrying the full
+ * booking intent in notes so the signature-verified webhook confirms exactly.
+ * Throws on failure — no local fake orders.
  */
-export async function processRazorpayPayment(
-  order: { id: string; amount: number; currency: string },
-  guest: { name: string; email: string; phone: string },
-  stayTitle: string
-): Promise<PaymentSuccessResponse> {
-  return new Promise((resolve) => {
-    // In React Native / Expo Go, simulate standard Razorpay payment gateway
-    // In standalone build, native react-native-razorpay SDK handles UPI intent
-    setTimeout(() => {
-      const paymentId = `pay_hilt_${Date.now().toString(36)}`;
-      const signature = `sig_${Math.random().toString(36).substring(2, 12)}`;
-
-      const releaseDate = new Date();
-      releaseDate.setHours(releaseDate.getHours() + 24);
-
-      resolve({
-        razorpay_payment_id: paymentId,
-        razorpay_order_id: order.id,
-        razorpay_signature: signature,
-        escrow_status: 'held_in_escrow',
-        escrow_release_time: releaseDate.toISOString(),
-      });
-    }, 1400);
+export async function createRazorpayOrder(
+  payload: RazorpayOrderPayload
+): Promise<{ id: string; amount: number; currency: string }> {
+  requireSupabaseConfig();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/razorpay-create-order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY as string,
+    },
+    body: JSON.stringify({
+      amount: payload.amount,
+      currency: payload.currency || 'INR',
+      property_id: payload.propertyId,
+      traveler_id: payload.travelerId,
+      room_id: payload.roomId,
+      booking_type: payload.bookingType,
+      check_in: payload.checkIn,
+      check_out: payload.checkOut,
+      guests_count: payload.guestsCount,
+      total_nights: payload.totalNights,
+      nightly_rate: payload.nightlyRate,
+      subtotal: payload.subtotal,
+      cleaning_fee: payload.cleaningFee ?? 0,
+      platform_fee: payload.platformFee,
+      gst_amount: payload.gstAmount ?? 0,
+      initial_status: payload.initialStatus ?? 'confirmed',
+      guest_email: payload.guestEmail,
+    }),
   });
-}
 
-/**
- * Landslide Advisory / Roadblock Protection Event.
- * When HP/UK Disaster Management issues a red alert or road closure on NH-3/NH-305,
- * this triggers automated 100% refund from Escrow to the guest and dispatches
- * host emergency relief.
- */
-export async function triggerLandslideRefund(
-  orderId: string,
-  highwayRoute: string,
-  guestUpi: string
-): Promise<{ refunded: boolean; refundId: string; hostReliefDisbursed: boolean }> {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        refunded: true,
-        refundId: `rfnd_${Date.now().toString(36)}`,
-        hostReliefDisbursed: true,
-      });
-    }, 1000);
-  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.error || `Order creation failed (${res.status})`);
+  }
+  if (!data?.order?.id) {
+    throw new Error(data?.error || 'Payment provider did not return an order.');
+  }
+  return {
+    id: data.order.id,
+    amount: data.order.amount,
+    currency: data.order.currency || 'INR',
+  };
 }

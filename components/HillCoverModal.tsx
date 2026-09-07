@@ -1,26 +1,6 @@
 import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  ScrollView,
-  SafeAreaView,
-  Alert,
-} from 'react-native';
-import {
-  X,
-  ShieldCheck,
-  AlertTriangle,
-  Umbrella,
-  LifeBuoy,
-  Clock,
-  Landmark,
-  CheckCircle2,
-  PhoneCall,
-  Lock,
-} from 'lucide-react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
+import { X, ShieldCheck, AlertTriangle, Home, Clock, PhoneCall, Mail } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 
 interface HillCoverModalProps {
@@ -28,132 +8,90 @@ interface HillCoverModalProps {
   onClose: () => void;
 }
 
+const POLICIES = [
+  {
+    icon: AlertTriangle,
+    title: '1. Mountain Road Closure & Landslide Protection',
+    desc: 'If a landslide, snow blockage, or official police/NHAI/BRO road closure physically prevents reaching your property within 48 hours of scheduled check-in, you receive a 100% immediate refund of all stay fees and taxes.',
+  },
+  {
+    icon: Home,
+    title: '2. Stay Quality & Access Guarantee',
+    desc: 'If a host cancels, the property lacks essential heating/water, or is materially misrepresented compared to the listing, Hilt issues a 100% refund plus up to ₹5,000 relocation credit towards an alternate verified stay in the valley.',
+  },
+  {
+    icon: ShieldCheck,
+    title: '3. Host Property & Accidental Damage Cover',
+    desc: 'Every verified booking covers host properties against accidental structural or amenity damage up to ₹50,000, funded directly by the Hilt Platform Reserve escrow without painful deposit deductions.',
+  },
+  {
+    icon: Clock,
+    title: '4. 24-Hour Payout Escrow Hold',
+    desc: 'Guest payments are held securely in escrow and released to the host 24 hours after successful check-in. This gives travelers time to verify the home while assuring hosts their money is locked.',
+  },
+];
+
 export function HillCoverModal({ visible, onClose }: HillCoverModalProps) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
       <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
             <X size={20} color={Colors.textPrimary} />
           </TouchableOpacity>
-          <View style={styles.headerTitleRow}>
-            <ShieldCheck size={18} color="#15803D" />
-            <Text style={styles.headerTitle}>Hilt HillCover™ Protection</Text>
-          </View>
+          <Text style={styles.headerTitle}>HillCover Guarantee</Text>
           <View style={{ width: 36 }} />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Hero Banner */}
-          <View style={styles.heroCard}>
-            <View style={styles.kickerRow}>
-              <Umbrella size={14} color={Colors.textWhite} />
-              <Text style={styles.kickerText}>ZERO-ANXIETY MOUNTAIN TRAVEL</Text>
-            </View>
-            <Text style={styles.heroTitle}>
-              Built specifically for the rugged realities of the Himalayas.
-            </Text>
+          <View style={styles.hero}>
+            <ShieldCheck size={26} color="#15803D" />
+            <Text style={styles.heroTitle}>Comprehensive Mountain Protection</Text>
             <Text style={styles.heroSub}>
-              Unlike standard city platforms, Hilt automatically protects both guests and hosts against mountain natural events, blocked passes, and timber heritage care.
+              Included automatically with every booking on Hilt at no extra cost.
             </Text>
           </View>
 
-          {/* Core Pillar 1: Landslide & Roadblock Guarantee */}
-          <View style={styles.pillarCard}>
-            <View style={styles.pillarIconCircle}>
-              <AlertTriangle size={22} color="#DC2626" />
-            </View>
-            <View style={styles.pillarContent}>
-              <View style={styles.pillarHeaderRow}>
-                <Text style={styles.pillarTitle}>100% Landslide & Roadblock Refund</Text>
-                <View style={styles.tagActive}>
-                  <Text style={styles.tagActiveText}>Included Free</Text>
+          {POLICIES.map((p) => {
+            const IconComp = p.icon;
+            return (
+              <View key={p.title} style={styles.policyCard}>
+                <View style={styles.cardHeader}>
+                  <IconComp size={18} color="#059669" />
+                  <Text style={styles.cardTitle}>{p.title}</Text>
                 </View>
+                <Text style={styles.cardDesc}>{p.desc}</Text>
               </View>
-              <Text style={styles.pillarDesc}>
-                If highway NH-3, NH-305, Jalori Pass, or the direct link road to your homestay is closed due to active landslides, flash floods, or heavy snowfall verified by HP/UK Disaster Management (SDMA), you receive an <Text style={{ fontWeight: '700', color: Colors.textPrimary }}>instant 100% refund</Text> with zero cancellation penalty.
-              </Text>
-              <View style={styles.reliefStrip}>
-                <CheckCircle2 size={14} color="#15803D" />
-                <Text style={styles.reliefText}>
-                  Hosts receive ₹2,000 contingency relief from the Hilt HillCover Fund for prepared meals.
-                </Text>
-              </View>
-            </View>
+            );
+          })}
+
+          <View style={styles.claimSection}>
+            <Text style={styles.claimTitle}>How to File a Claim</Text>
+            <Text style={styles.claimText}>
+              1. Open your booking in the <Text style={{ fontWeight: '700' }}>Trips</Text> tab.
+            </Text>
+            <Text style={styles.claimText}>
+              2. Tap <Text style={{ fontWeight: '700' }}>HillCover</Text> to file an incident report.
+            </Text>
+            <Text style={styles.claimText}>
+              3. Attach photos, official advisories, or repair estimates.
+            </Text>
+            <Text style={styles.claimText}>
+              4. Our Mountain Rapid Response team reviews all claims within 24 hours.
+            </Text>
           </View>
 
-          {/* Core Pillar 2: 24h Post Check-In Escrow Release */}
-          <View style={styles.pillarCard}>
-            <View style={[styles.pillarIconCircle, { backgroundColor: 'rgba(37, 99, 235, 0.12)' }]}>
-              <Lock size={22} color="#2563EB" />
+          <View style={styles.contactBox}>
+            <Text style={styles.contactTitle}>Emergency Support & Ops Contact</Text>
+            <View style={styles.contactRow}>
+              <PhoneCall size={14} color={Colors.textSecondary} />
+              <Text style={styles.contactText}>24/7 Helpline: +91 1800-4458-2273 (1800-HILT-CARE)</Text>
             </View>
-            <View style={styles.pillarContent}>
-              <View style={styles.pillarHeaderRow}>
-                <Text style={styles.pillarTitle}>Automated Smart Escrow</Text>
-                <View style={[styles.tagActive, { backgroundColor: '#DBEAFE' }]}>
-                  <Text style={[styles.tagActiveText, { color: '#1E40AF' }]}>Escrow Vault</Text>
-                </View>
-              </View>
-              <Text style={styles.pillarDesc}>
-                Your money does not sit with an unverified third party. It is locked in Razorpay Smart Escrow and only disbursed to the host 24 hours after your successful physical check-in and Wi-Fi/room verification.
-              </Text>
-              <View style={styles.bulletRow}>
-                <Clock size={13} color={Colors.textSecondary} />
-                <Text style={styles.bulletText}>
-                  98% released to host UPI within 24h. Hilt takes only a transparent 2% platform fee.
-                </Text>
-              </View>
+            <View style={styles.contactRow}>
+              <Mail size={14} color={Colors.textSecondary} />
+              <Text style={styles.contactText}>Escrow Claims: claims@hilt.travel</Text>
             </View>
           </View>
-
-          {/* Core Pillar 3: ₹5 Lakh Heritage Kath-Kuni Timber Protection */}
-          <View style={styles.pillarCard}>
-            <View style={[styles.pillarIconCircle, { backgroundColor: Colors.pillInactive }]}>
-              <Landmark size={22} color={Colors.primaryBlack} />
-            </View>
-            <View style={styles.pillarContent}>
-              <View style={styles.pillarHeaderRow}>
-                <Text style={styles.pillarTitle}>₹5,00,000 Heritage Protection</Text>
-                <View style={[styles.tagActive, { backgroundColor: Colors.pillInactive }]}>
-                  <Text style={[styles.tagActiveText, { color: Colors.primaryBlack }]}>For Hosts</Text>
-                </View>
-              </View>
-              <Text style={styles.pillarDesc}>
-                Handcrafted Deodar cedar wood carvings, stone roofs, antique brass bukharis, and Himalayan structural architecture are covered against accidental guest damage up to ₹5 Lakh.
-              </Text>
-            </View>
-          </View>
-
-          {/* Core Pillar 4: 24/7 Mountain SOS Assist */}
-          <View style={styles.pillarCard}>
-            <View style={[styles.pillarIconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-              <LifeBuoy size={22} color="#059669" />
-            </View>
-            <View style={styles.pillarContent}>
-              <View style={styles.pillarHeaderRow}>
-                <Text style={styles.pillarTitle}>24/7 4x4 Mountain Rescue Dispatch</Text>
-              </View>
-              <Text style={styles.pillarDesc}>
-                Stuck in snow or stranded on an unpaved forest trail? Tap the SOS button in your Hilt Active Trip boarding pass to dispatch a local 4x4 recovery vehicle and coordinate with the local taxi union.
-              </Text>
-            </View>
-          </View>
-
-          {/* Hotline CTA */}
-          <TouchableOpacity
-            style={styles.hotlineButton}
-            onPress={() =>
-              Alert.alert(
-                'Hilt Mountain Emergency Hotline',
-                'Dial +91 1902 294020 for 24/7 Kullu & Shimla Valley Emergency Response Dispatch.'
-              )
-            }
-            activeOpacity={0.88}
-          >
-            <PhoneCall size={18} color={Colors.textWhite} />
-            <Text style={styles.hotlineButtonText}>24/7 Mountain SOS Hotline</Text>
-          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -161,10 +99,7 @@ export function HillCoverModal({ visible, onClose }: HillCoverModalProps) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.surfaceLight,
-  },
+  safeArea: { flex: 1, backgroundColor: Colors.surfaceLight },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -182,144 +117,48 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
+  content: { paddingHorizontal: 20, paddingVertical: 18, paddingBottom: 40 },
+  hero: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 16,
     gap: 6,
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    paddingBottom: 40,
-  },
-  heroCard: {
-    backgroundColor: '#0F1419',
-    borderRadius: 22,
-    padding: 20,
-    marginBottom: 20,
-  },
-  kickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  kickerText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.textWhite,
-    letterSpacing: 1,
-  },
-  heroTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.textWhite,
-    lineHeight: 26,
-  },
-  heroSub: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    lineHeight: 19,
-    marginTop: 8,
-  },
-  pillarCard: {
-    flexDirection: 'row',
+  heroTitle: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary, marginTop: 4 },
+  heroSub: { fontSize: 13, color: '#15803D', lineHeight: 18 },
+  policyCard: {
     backgroundColor: Colors.backgroundApp,
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    marginBottom: 14,
+    marginBottom: 10,
   },
-  pillarIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(220, 38, 38, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  pillarContent: {
-    flex: 1,
-  },
-  pillarHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 6,
-    gap: 8,
-  },
-  pillarTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    flex: 1,
-  },
-  tagActive: {
-    backgroundColor: '#DCFCE7',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  tagActiveText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#15803D',
-  },
-  pillarDesc: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    lineHeight: 18,
-  },
-  reliefStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F0FDF4',
-    padding: 8,
-    borderRadius: 8,
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  cardTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, flex: 1 },
+  cardDesc: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
+  claimSection: {
+    backgroundColor: Colors.pillInactive,
+    borderRadius: 14,
+    padding: 14,
     marginTop: 10,
+    marginBottom: 12,
   },
-  reliefText: {
-    fontSize: 11,
-    color: '#166534',
-    fontWeight: '500',
-    flex: 1,
+  claimTitle: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary, marginBottom: 8 },
+  claimText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 19 },
+  contactBox: {
+    backgroundColor: Colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 4,
   },
-  bulletRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-  },
-  bulletText: {
-    fontSize: 11,
-    color: Colors.textMuted,
-  },
-  hotlineButton: {
-    backgroundColor: Colors.primaryBlack,
-    height: 52,
-    borderRadius: 9999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  hotlineButtonText: {
-    color: Colors.textWhite,
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  contactTitle: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary, marginBottom: 6 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 3 },
+  contactText: { fontSize: 11, color: Colors.textSecondary },
 });

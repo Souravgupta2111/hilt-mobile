@@ -12,9 +12,12 @@ import {
   Platform,
   KeyboardAvoidingView,
   ScrollView,
+  Linking,
 } from 'react-native';
-import { X, Mail, Phone, Lock, Apple, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react-native';
-import { supabase } from '../lib/supabase';
+import { X, Mail, Phone, ArrowRight, ShieldCheck, Check, KeyRound } from 'lucide-react-native';
+import { supabase, resetPasswordForEmail } from '../lib/supabase';
+import { registerPushToken } from '../lib/push';
+import { LegalModal, type LegalDoc } from './LegalModal';
 import { Colors } from '../constants/theme';
 
 interface AuthModalProps {
@@ -24,7 +27,7 @@ interface AuthModalProps {
 }
 
 export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
-  const [authMode, setAuthMode] = useState<'options' | 'email' | 'phone'>('options');
+  const [authMode, setAuthMode] = useState<'options' | 'email' | 'phone' | 'reset'>('options');
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,6 +35,8 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
   const [otpCode, setOtpCode] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [agreed, setAgreed] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null);
 
   const resetState = () => {
     setAuthMode('options');
@@ -42,6 +47,7 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
     setOtpCode('');
     setOtpSent(false);
     setLoading(false);
+    setAgreed(false);
   };
 
   const handleClose = () => {
@@ -49,104 +55,162 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
     onClose();
   };
 
-  // Apple Sign In (Hig Compliant)
-  const handleAppleSignIn = async () => {
-    setLoading(true);
-    try {
-      // In production native build, expo-apple-authentication generates identity token.
-      // Here we simulate successful Supabase Auth token exchange for Apple.
-      setTimeout(() => {
-        setLoading(false);
-        Alert.alert('Apple Sign In Successful', 'Signed in as Roman Vance via Apple ID.');
-        onSuccess({ email: 'roman.apple@hilt.travel', full_name: 'Roman Vance' });
-        handleClose();
-      }, 900);
-    } catch (e: any) {
-      setLoading(false);
-      Alert.alert('Authentication Error', e.message || 'Failed to sign in with Apple');
-    }
+  const stampConsent = async (userId: string) => {
+    await supabase
+      .from('profiles')
+      .update({ terms_accepted_at: new Date().toISOString() })
+      .eq('id', userId);
   };
 
-  // Google Sign In
-  const handleGoogleSignIn = async () => {
-    setLoading(true);
-    try {
-      setTimeout(() => {
-        setLoading(false);
-        Alert.alert('Google Sign In Successful', 'Signed in as roman@hilt.travel via Google OAuth.');
-        onSuccess({ email: 'roman@hilt.travel', full_name: 'Roman Vance' });
-        handleClose();
-      }, 900);
-    } catch (e: any) {
-      setLoading(false);
-      Alert.alert('Authentication Error', e.message || 'Failed to sign in with Google');
-    }
+  const finishAuth = (user: any) => {
+    stampConsent(user.id).catch(() => { });
+    registerPushToken().catch(() => { });
+    onSuccess(user);
+    handleClose();
   };
 
-  // Email & Password Flow
+  const requireConsent = () => {
+    if (!agreed) {
+      Alert.alert('One tap needed', 'Please accept the Terms & Privacy Policy to continue.');
+      return false;
+    }
+    return true;
+  };
+
+  const ensureProfile = async (userId: string, fallbackName?: string) => {
+    const { data } = await supabase.from('profiles').select('id').eq('id', userId).single();
+    if (data) return;
+    await supabase.from('profiles').insert([
+      {
+        id: userId,
+        full_name: fallbackName || 'Hilt Traveler',
+        email: email || null,
+        phone: phoneNumber ? `+91 ${phoneNumber}` : null,
+        role: 'traveler',
+        terms_accepted_at: new Date().toISOString(),
+      },
+    ]);
+  };
+
   const handleEmailAuth = async () => {
-    if (!email || !password) {
-      Alert.alert('Missing Fields', 'Please enter both your email and password.');
+    if (!email.trim() || !password) {
+      Alert.alert('Missing details', 'Enter your email and password.');
       return;
     }
+    if (!requireConsent()) return;
     setLoading(true);
     try {
       if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        setLoading(false);
+        const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
         if (error) throw error;
-        Alert.alert('Account Created', 'Welcome to Hilt! Your mountain journey begins.');
-        onSuccess(data.user);
-        handleClose();
-      } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        setLoading(false);
-        if (error) {
-          // If Supabase credentials/network error in test mode, fall back smoothly
-          Alert.alert('Welcome Back', `Signed in as ${email}`);
-          onSuccess({ email, full_name: 'Roman Vance' });
-          handleClose();
-          return;
+        if (data.user) {
+          await ensureProfile(data.user.id, email.split('@')[0]);
         }
-        Alert.alert('Welcome Back', 'Signed in successfully.');
-        onSuccess(data.user);
-        handleClose();
+        Alert.alert('Account created', 'Welcome to Hilt.');
+        finishAuth(data.user);
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (error) throw error;
+        finishAuth(data.user);
       }
     } catch (e: any) {
+      Alert.alert('Sign in failed', e.message || 'Check your details and try again.');
+    } finally {
       setLoading(false);
-      // Friendly fallback so user isn't blocked during testing
-      Alert.alert('Welcome to Hilt', `Authenticated as ${email}`);
-      onSuccess({ email, full_name: 'Roman Vance' });
-      handleClose();
     }
   };
 
-  // Phone OTP Flow (Crucial for Indian Travelers & Pahadi Homestay Hosts)
   const handleSendPhoneOtp = async () => {
-    if (!phoneNumber || phoneNumber.length < 10) {
-      Alert.alert('Invalid Number', 'Please enter a valid 10-digit mobile number.');
+    const digits = phoneNumber.replace(/\D/g, '');
+    if (digits.length !== 10) {
+      Alert.alert('Invalid number', 'Enter a valid 10-digit mobile number.');
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: `+91${digits}`,
+      });
+      if (error) throw error;
       setOtpSent(true);
-      Alert.alert('OTP Sent 📲', `A 6-digit verification code was sent to +91 ${phoneNumber}. (Test Code: 4921)`);
-    }, 800);
+    } catch (e: any) {
+      Alert.alert('Could not send OTP', e.message || 'Try again in a moment.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleVerifyPhoneOtp = async () => {
-    if (otpCode !== '4921' && otpCode.length !== 6) {
-      Alert.alert('Invalid OTP', 'Please enter the 6-digit OTP sent to your phone (Test code: 4921).');
+    if (otpCode.trim().length !== 6) {
+      Alert.alert('Invalid OTP', 'Enter the 6-digit code sent by SMS.');
+      return;
+    }
+    if (!requireConsent()) return;
+    setLoading(true);
+    try {
+      const digits = phoneNumber.replace(/\D/g, '');
+      const { data, error } = await supabase.auth.verifyOtp({
+        phone: `+91${digits}`,
+        token: otpCode.trim(),
+        type: 'sms',
+      });
+      if (error) throw error;
+      if (data.user) {
+        await ensureProfile(data.user.id, 'Hilt Traveler');
+      }
+      finishAuth(data.user);
+    } catch (e: any) {
+      Alert.alert('Verification failed', e.message || 'Check the code and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!email.trim()) {
+      Alert.alert('Email Required', 'Enter your account email to receive a password reset link.');
       return;
     }
     setLoading(true);
-    setTimeout(() => {
+    try {
+      await resetPasswordForEmail(email.trim());
+      Alert.alert(
+        'Reset Link Sent',
+        `A password recovery link has been sent to ${email.trim()}. Follow the instructions in your inbox.`,
+        [{ text: 'OK', onPress: () => setAuthMode('email') }]
+      );
+    } catch (e: any) {
+      Alert.alert('Reset Failed', e.message || 'Could not send reset link. Check your email address.');
+    } finally {
       setLoading(false);
-      Alert.alert('Phone Verified 🛡️', `Mobile number +91 ${phoneNumber} verified successfully.`);
-      onSuccess({ phone: `+91 ${phoneNumber}`, full_name: 'Pahadi Host / Guest' });
-      handleClose();
-    }, 700);
+    }
+  };
+
+  const handleOAuth = async (provider: 'google' | 'apple') => {
+    if (!requireConsent()) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: 'hilt://auth-callback',
+        },
+      });
+      if (error) throw error;
+      if (data?.url) {
+        await Linking.openURL(data.url);
+      }
+    } catch (e: any) {
+      Alert.alert(
+        `${provider === 'apple' ? 'Apple' : 'Google'} Sign-in`,
+        e.message || 'Could not start social authentication.'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -156,104 +220,88 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={{ flex: 1 }}
         >
-          {/* Top Bar */}
           <View style={styles.header}>
             <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
               <X size={20} color={Colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>
               {authMode === 'options'
-                ? 'Sign in or Sign up'
+                ? 'Sign in'
                 : authMode === 'email'
-                ? isSignUp
-                  ? 'Create Hilt Account'
-                  : 'Welcome Back'
-                : 'Mobile Number Login'}
+                  ? isSignUp
+                    ? 'Create account'
+                    : 'Welcome back'
+                  : authMode === 'reset'
+                    ? 'Reset password'
+                    : 'Mobile login'}
             </Text>
             <View style={{ width: 36 }} />
           </View>
 
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            {/* Mountain Hospitality Branding */}
             <View style={styles.brandBox}>
-              <View style={styles.kickerRow}>
-                <Sparkles size={14} color={Colors.primaryBlack} />
-                <Text style={styles.kickerText}>HILT IDENTITY & TRUST</Text>
-              </View>
-              <Text style={styles.brandTitle}>Authentic Himalayan Stays & Slow Living</Text>
-              <Text style={styles.brandSubtitle}>
-                Verified mountain hosts, direct bookings with 2% fair fee, and curated "Ghumna Phirna" local itineraries.
-              </Text>
+              <Text style={styles.brandTitle}>Himalayan stays, direct from hosts</Text>
+              <Text style={styles.brandSubtitle}>Sign in to book, host, and manage trips.</Text>
             </View>
 
-            {/* SCREEN 1: OAUTH & AUTH OPTIONS */}
             {authMode === 'options' && (
               <View style={styles.optionsContainer}>
-                {/* Apple Sign In (HIG compliant) */}
-                <TouchableOpacity
-                  style={styles.appleButton}
-                  onPress={handleAppleSignIn}
-                  disabled={loading}
-                  activeOpacity={0.88}
-                >
-                  <Apple size={20} color={Colors.textWhite} fill={Colors.textWhite} />
-                  <Text style={styles.appleButtonText}>Continue with Apple</Text>
-                </TouchableOpacity>
-
-                {/* Google Sign In */}
-                <TouchableOpacity
-                  style={styles.googleButton}
-                  onPress={handleGoogleSignIn}
-                  disabled={loading}
-                  activeOpacity={0.88}
-                >
-                  <View style={styles.googleGLogo}>
-                    <Text style={{ fontSize: 16, fontWeight: '800', color: '#4285F4' }}>G</Text>
-                  </View>
-                  <Text style={styles.googleButtonText}>Continue with Google</Text>
-                </TouchableOpacity>
-
-                {/* Divider */}
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>or continue with</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                {/* Phone Number Button (Indian Standard) */}
                 <TouchableOpacity
                   style={styles.methodButton}
                   onPress={() => setAuthMode('phone')}
                   activeOpacity={0.85}
                 >
                   <Phone size={18} color={Colors.textPrimary} />
-                  <Text style={styles.methodButtonText}>Mobile Number & OTP</Text>
+                  <Text style={styles.methodButtonText}>Continue with mobile OTP</Text>
                 </TouchableOpacity>
 
-                {/* Email & Password Button */}
                 <TouchableOpacity
                   style={styles.methodButton}
                   onPress={() => setAuthMode('email')}
                   activeOpacity={0.85}
                 >
                   <Mail size={18} color={Colors.textPrimary} />
-                  <Text style={styles.methodButtonText}>Email & Password</Text>
+                  <Text style={styles.methodButtonText}>Continue with email</Text>
                 </TouchableOpacity>
 
-                {/* Trust Footer */}
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or continue with</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                {Platform.OS === 'ios' && (
+                  <TouchableOpacity
+                    style={[styles.methodButton, styles.appleButton]}
+                    onPress={() => handleOAuth('apple')}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.appleGlyph}></Text>
+                    <Text style={styles.appleButtonText}>Continue with Apple</Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={styles.methodButton}
+                  onPress={() => handleOAuth('google')}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.googleIconWrap}>
+                    <Text style={styles.googleGlyph}>G</Text>
+                  </View>
+                  <Text style={styles.methodButtonText}>Continue with Google</Text>
+                </TouchableOpacity>
+
                 <View style={styles.trustBadgeRow}>
                   <ShieldCheck size={16} color="#15803D" />
-                  <Text style={styles.trustBadgeText}>
-                    Aadhaar-verified hosts & 100% Escrow Protection
-                  </Text>
+                  <Text style={styles.trustBadgeText}>Verified hosts · Secure payments</Text>
                 </View>
               </View>
             )}
 
-            {/* SCREEN 2: EMAIL & PASSWORD */}
             {authMode === 'email' && (
               <View style={styles.formContainer}>
-                <Text style={styles.inputLabel}>Email Address</Text>
+                <Text style={styles.inputLabel}>Email</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="name@example.com"
@@ -267,12 +315,21 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
                 <Text style={styles.inputLabel}>Password</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Enter your password"
+                  placeholder="Enter password"
                   placeholderTextColor={Colors.textMuted}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry
                 />
+
+                {!isSignUp && (
+                  <TouchableOpacity
+                    style={styles.forgotBtn}
+                    onPress={() => setAuthMode('reset')}
+                  >
+                    <Text style={styles.forgotText}>Forgot password?</Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={styles.primaryAuthButton}
@@ -285,7 +342,7 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
                   ) : (
                     <>
                       <Text style={styles.primaryAuthButtonText}>
-                        {isSignUp ? 'Create Account' : 'Sign In'}
+                        {isSignUp ? 'Create account' : 'Sign in'}
                       </Text>
                       <ArrowRight size={18} color={Colors.textWhite} />
                     </>
@@ -297,34 +354,66 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
                   onPress={() => setIsSignUp(!isSignUp)}
                 >
                   <Text style={styles.switchModeText}>
-                    {isSignUp
-                      ? 'Already have an account? Sign In'
-                      : "Don't have an account? Sign Up"}
+                    {isSignUp ? 'Have an account? Sign in' : 'New here? Create account'}
                   </Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.backLink}
-                  onPress={() => setAuthMode('options')}
-                >
-                  <Text style={styles.backLinkText}>← Choose another sign in method</Text>
+                <TouchableOpacity style={styles.backLink} onPress={() => setAuthMode('options')}>
+                  <Text style={styles.backLinkText}>Back</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            {/* SCREEN 3: PHONE OTP */}
+            {authMode === 'reset' && (
+              <View style={styles.formContainer}>
+                <Text style={styles.resetExplanation}>
+                  Enter the email associated with your Hilt account and we'll send you a password recovery link.
+                </Text>
+                <Text style={styles.inputLabel}>Email</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="name@example.com"
+                  placeholderTextColor={Colors.textMuted}
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+
+                <TouchableOpacity
+                  style={styles.primaryAuthButton}
+                  onPress={handleResetPassword}
+                  disabled={loading}
+                  activeOpacity={0.88}
+                >
+                  {loading ? (
+                    <ActivityIndicator color={Colors.textWhite} />
+                  ) : (
+                    <>
+                      <Text style={styles.primaryAuthButtonText}>Send reset link</Text>
+                      <ArrowRight size={18} color={Colors.textWhite} />
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.backLink} onPress={() => setAuthMode('email')}>
+                  <Text style={styles.backLinkText}>Back to sign in</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {authMode === 'phone' && (
               <View style={styles.formContainer}>
                 {!otpSent ? (
                   <>
-                    <Text style={styles.inputLabel}>Mobile Number</Text>
+                    <Text style={styles.inputLabel}>Mobile number</Text>
                     <View style={styles.phoneInputRow}>
                       <View style={styles.countryCodeBadge}>
-                        <Text style={styles.countryCodeText}>🇮🇳 +91</Text>
+                        <Text style={styles.countryCodeText}>+91</Text>
                       </View>
                       <TextInput
                         style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                        placeholder="98160 XXXXX"
+                        placeholder="98160 00000"
                         placeholderTextColor={Colors.textMuted}
                         value={phoneNumber}
                         onChangeText={setPhoneNumber}
@@ -332,10 +421,6 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
                         maxLength={10}
                       />
                     </View>
-
-                    <Text style={styles.helperText}>
-                      We will send a 6-digit verification code via SMS.
-                    </Text>
 
                     <TouchableOpacity
                       style={styles.primaryAuthButton}
@@ -355,20 +440,16 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
                   </>
                 ) : (
                   <>
-                    <Text style={styles.inputLabel}>Enter 6-Digit OTP</Text>
+                    <Text style={styles.inputLabel}>Enter OTP</Text>
                     <TextInput
-                      style={[styles.input, { fontSize: 24, letterSpacing: 8, textAlign: 'center', fontWeight: '800' }]}
-                      placeholder="• • • • • •"
+                      style={[styles.input, styles.otpInput]}
+                      placeholder="6-digit code"
                       placeholderTextColor={Colors.textMuted}
                       value={otpCode}
                       onChangeText={setOtpCode}
                       keyboardType="number-pad"
                       maxLength={6}
                     />
-
-                    <Text style={styles.helperText}>
-                      Code sent to +91 {phoneNumber}. Test code is <Text style={{ fontWeight: '700', color: Colors.primaryBlack }}>4921</Text>.
-                    </Text>
 
                     <TouchableOpacity
                       style={styles.primaryAuthButton}
@@ -380,38 +461,57 @@ export function AuthModal({ visible, onClose, onSuccess }: AuthModalProps) {
                         <ActivityIndicator color={Colors.textWhite} />
                       ) : (
                         <>
-                          <Text style={styles.primaryAuthButtonText}>Verify & Proceed</Text>
+                          <Text style={styles.primaryAuthButtonText}>Verify</Text>
                           <ShieldCheck size={18} color={Colors.textWhite} />
                         </>
                       )}
                     </TouchableOpacity>
 
                     <TouchableOpacity onPress={() => setOtpSent(false)} style={{ marginTop: 12 }}>
-                      <Text style={[styles.backLinkText, { textAlign: 'center' }]}>Edit phone number</Text>
+                      <Text style={[styles.backLinkText, { textAlign: 'center' }]}>
+                        Edit phone number
+                      </Text>
                     </TouchableOpacity>
                   </>
                 )}
 
-                <TouchableOpacity
-                  style={styles.backLink}
-                  onPress={() => setAuthMode('options')}
-                >
-                  <Text style={styles.backLinkText}>← Choose another sign in method</Text>
+                <TouchableOpacity style={styles.backLink} onPress={() => setAuthMode('options')}>
+                  <Text style={styles.backLinkText}>Back</Text>
                 </TouchableOpacity>
               </View>
             )}
+
+            <TouchableOpacity style={styles.consentRow} onPress={() => setAgreed(!agreed)}>
+              <View style={[styles.checkbox, agreed && styles.checkboxOn]}>
+                {agreed && <Check size={14} color={Colors.textWhite} />}
+              </View>
+              <Text style={styles.consentText}>
+                I agree to the{' '}
+                <Text style={styles.consentLink} onPress={() => setLegalDoc('terms')}>
+                  Terms
+                </Text>
+                {', '}
+                <Text style={styles.consentLink} onPress={() => setLegalDoc('cancellation')}>
+                  Cancellation Policy
+                </Text>
+                {' & '}
+                <Text style={styles.consentLink} onPress={() => setLegalDoc('privacy')}>
+                  Privacy Policy
+                </Text>
+              </Text>
+            </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
+        {legalDoc && (
+          <LegalModal visible onClose={() => setLegalDoc(null)} initialDoc={legalDoc} />
+        )}
       </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.surfaceLight,
-  },
+  safeArea: { flex: 1, backgroundColor: Colors.surfaceLight },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -429,108 +529,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  content: {
-    paddingHorizontal: 22,
-    paddingVertical: 24,
-  },
-  brandBox: {
-    marginBottom: 28,
-  },
-  kickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-  },
-  kickerText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.textSecondary,
-    letterSpacing: 1,
-  },
-  brandTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-    lineHeight: 28,
-  },
-  brandSubtitle: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    lineHeight: 19,
-    marginTop: 6,
-  },
-  optionsContainer: {
-    gap: 12,
-  },
-  appleButton: {
-    backgroundColor: Colors.primaryBlack,
-    height: 54,
-    borderRadius: 9999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  appleButtonText: {
-    color: Colors.textWhite,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  googleButton: {
-    backgroundColor: '#FFFFFF',
-    height: 54,
-    borderRadius: 9999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  googleGLogo: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  googleButtonText: {
-    color: Colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 14,
-    gap: 12,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E5E7EB',
-  },
-  dividerText: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    fontWeight: '500',
-  },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
+  content: { paddingHorizontal: 22, paddingVertical: 24 },
+  brandBox: { marginBottom: 24 },
+  brandTitle: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary, lineHeight: 28 },
+  brandSubtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 6 },
+  optionsContainer: { gap: 12 },
   methodButton: {
     backgroundColor: Colors.pillInactive,
     height: 52,
@@ -540,11 +544,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
-  methodButtonText: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  methodButtonText: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
   trustBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -556,20 +556,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 18,
   },
-  trustBadgeText: {
-    fontSize: 12,
-    color: '#15803D',
-    fontWeight: '600',
-  },
-  formContainer: {
-    marginTop: 8,
-  },
-  inputLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginBottom: 6,
-  },
+  trustBadgeText: { fontSize: 12, color: '#15803D', fontWeight: '600' },
+  formContainer: { marginTop: 8 },
+  inputLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginBottom: 6 },
   input: {
     backgroundColor: Colors.pillInactive,
     borderRadius: 16,
@@ -579,11 +568,8 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginBottom: 16,
   },
-  phoneInputRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 10,
-  },
+  otpInput: { fontSize: 20, letterSpacing: 4, textAlign: 'center', fontWeight: '700' as const },
+  phoneInputRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   countryCodeBadge: {
     backgroundColor: Colors.pillInactive,
     borderRadius: 16,
@@ -591,17 +577,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  countryCodeText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  helperText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 20,
-    lineHeight: 18,
-  },
+  countryCodeText: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   primaryAuthButton: {
     backgroundColor: Colors.primaryBlack,
     height: 54,
@@ -610,33 +586,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
   },
-  primaryAuthButtonText: {
-    color: Colors.textWhite,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  switchModeButton: {
+  primaryAuthButtonText: { color: Colors.textWhite, fontSize: 15, fontWeight: '700' },
+  switchModeButton: { alignItems: 'center', marginTop: 18 },
+  switchModeText: { fontSize: 13, color: Colors.textSecondary, fontWeight: '600' },
+  backLink: { alignItems: 'center', marginTop: 20 },
+  backLinkText: { fontSize: 13, color: Colors.textMuted, fontWeight: '500' },
+  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 22, paddingHorizontal: 4 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: Colors.borderLight,
     alignItems: 'center',
-    marginTop: 18,
+    justifyContent: 'center',
+    marginTop: 1,
   },
-  switchModeText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
-  backLink: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  backLinkText: {
-    fontSize: 13,
-    color: Colors.textMuted,
-    fontWeight: '500',
-  },
+  checkboxOn: { backgroundColor: Colors.primaryBlack, borderColor: Colors.primaryBlack },
+  consentText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
+  consentLink: { color: Colors.textPrimary, fontWeight: '700', textDecorationLine: 'underline' },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#E5E7EB' },
+  dividerText: { marginHorizontal: 10, fontSize: 12, color: Colors.textMuted, fontWeight: '500' },
+  appleButton: { backgroundColor: '#000000' },
+  appleGlyph: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginBottom: 2 },
+  appleButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  googleIconWrap: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#4285F4', alignItems: 'center', justifyContent: 'center' },
+  googleGlyph: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  forgotBtn: { alignItems: 'flex-end', marginTop: -6, marginBottom: 14 },
+  forgotText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
+  resetExplanation: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18, marginBottom: 14 },
 });

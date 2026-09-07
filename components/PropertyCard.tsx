@@ -7,10 +7,17 @@ import { Colors } from '../constants/theme';
 interface PropertyCardProps {
   property: Property;
   onPress: () => void;
+  saved?: boolean;
+  onToggleSave?: () => void;
 }
 
-export function PropertyCard({ property, onPress }: PropertyCardProps) {
-  const [isFavorite, setIsFavorite] = useState(false);
+export function PropertyCard({ property, onPress, saved, onToggleSave }: PropertyCardProps) {
+  const [localFav, setLocalFav] = useState(false);
+  const isFavorite = saved ?? localFav;
+  const toggle = () => {
+    if (onToggleSave) onToggleSave();
+    else setLocalFav(!localFav);
+  };
 
   const formatPrice = (price: number) => {
     if (price >= 1000) {
@@ -24,14 +31,20 @@ export function PropertyCard({ property, onPress }: PropertyCardProps) {
       style={styles.card}
       onPress={onPress}
       activeOpacity={0.92}
+      accessibilityRole="button"
+      accessibilityLabel={`${property.title}, ${property.town}, ₹${property.price_entire_villa} per night`}
     >
       {/* Hero Image with Overlaid Badges */}
       <View style={styles.imageContainer}>
-        <Image
-          source={{ uri: property.images[0] }}
-          style={styles.image}
-          resizeMode="cover"
-        />
+        {property.images?.[0] ? (
+          <Image
+            source={{ uri: property.images[0] }}
+            style={styles.image}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.image, styles.imageFallback]} />
+        )}
 
         {/* Promo Pill (Top-Left) */}
         {property.discount_percentage > 0 && (
@@ -43,8 +56,10 @@ export function PropertyCard({ property, onPress }: PropertyCardProps) {
         {/* Heart Favorite Toggle (Top-Right) */}
         <TouchableOpacity
           style={styles.heartButton}
-          onPress={() => setIsFavorite(!isFavorite)}
+          onPress={toggle}
           activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={`${isFavorite ? 'Remove' : 'Save'} ${property.title}`}
         >
           <Heart
             size={18}
@@ -122,6 +137,9 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  imageFallback: {
+    backgroundColor: '#E5E7EB',
+  },
   discountBadge: {
     position: 'absolute',
     top: 14,
@@ -142,9 +160,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 14,
     right: 14,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
     alignItems: 'center',
     justifyContent: 'center',

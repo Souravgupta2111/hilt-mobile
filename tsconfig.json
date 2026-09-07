@@ -1,7 +1,15 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "paths": {
+      // Typecheck against the engine's compiled declarations (built with its
+      // own tsconfig). Metro still resolves the live TS source at runtime.
+      "@wayzyy/moderation-engine": ["../WayzyyChat/react-native/dist/src/index.d.ts"],
+      // react-native-maps@1.x ships raw TS source as main; our tsc is stricter
+      // than its internals. Use the local shim for typecheck only.
+      "react-native-maps": ["./types/react-native-maps.d.ts"]
+    }
   },
   "exclude": ["node_modules", "supabase"]
 }
